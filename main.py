@@ -6,11 +6,7 @@ import re
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
-from aiogram.utils.keyboard import (
-    ReplyKeyboardBuilder,
-    InlineKeyboardBuilder
-)
-from aiogram.enums import ChatMemberStatus
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
 from parser import get_quizzes
 
@@ -45,15 +41,12 @@ dp = Dispatcher()
 # =========================================================
 user_sessions = {}
 
-group_active_quizzes = {}
-
 # =========================================================
 # LOAD USERS
 # =========================================================
 def load_allowed_ids():
 
     try:
-
         with open(
             "users.json",
             "r",
@@ -67,7 +60,6 @@ def load_allowed_ids():
             )
 
     except:
-
         return []
 
 ALLOWED_IDS = load_allowed_ids()
@@ -117,57 +109,12 @@ def get_private_menu():
     )
 
 # =========================================================
-# GROUP SUBJECT MENU
-# =========================================================
-def get_group_subjects():
-
-    builder = InlineKeyboardBuilder()
-
-    for subject in SUBJECTS.keys():
-
-        builder.button(
-            text=f"📚 {subject}",
-            callback_data=f"subject:{subject}"
-        )
-
-    builder.adjust(2)
-
-    return builder.as_markup()
-
-# =========================================================
-# SESSION KEY
-# =========================================================
-def get_session_key(user_id, chat_id):
-    return f"{user_id}_{chat_id}"
-
-# =========================================================
-# ADMIN CHECK
-# =========================================================
-async def is_admin(chat_id, user_id):
-
-    try:
-
-        member = await bot.get_chat_member(
-            chat_id,
-            user_id
-        )
-
-        return member.status in [
-            ChatMemberStatus.ADMINISTRATOR,
-            ChatMemberStatus.CREATOR
-        ]
-
-    except:
-        return False
-
-# =========================================================
 # START
 # =========================================================
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
 
     user_id = message.from_user.id
-    chat_id = message.chat.id
 
     if not is_allowed(user_id):
 
@@ -177,61 +124,22 @@ async def cmd_start(message: types.Message):
             parse_mode="Markdown"
         )
 
-    # GROUP ACTIVE QUIZ
-    if chat_id in group_active_quizzes:
-
-        active = group_active_quizzes[chat_id]
-
-        return await message.answer(
-            f"⚠️ Guruhda aktiv test mavjud!\n\n"
-            f"👤 {active['starter_name']}"
-        )
-
-    # GROUP
-    if message.chat.type in [
-        "group",
-        "supergroup"
-    ]:
-
-        await message.answer(
-            "📚 Fan tanlang:",
-            reply_markup=get_group_subjects()
-        )
-
-    # PRIVATE
-    else:
-
-        await message.answer(
-            "📚 Fan tanlang:",
-            reply_markup=get_private_menu()
-        )
+    await message.answer(
+        "🎓 TEST BOTIGA XUSH KELIBSIZ!\n\n"
+        "📚 Fan tanlang:",
+        reply_markup=get_private_menu()
+    )
 
 # =========================================================
-# PRIVATE SUBJECT
+# SUBJECT
 # =========================================================
 @dp.message(F.text.startswith("📚 "))
 async def choose_count(message: types.Message):
 
     user_id = message.from_user.id
-    chat_id = message.chat.id
 
     if not is_allowed(user_id):
         return
-
-    if message.chat.type in [
-        "group",
-        "supergroup"
-    ]:
-        return
-
-    if chat_id in group_active_quizzes:
-
-        active = group_active_quizzes[chat_id]
-
-        return await message.answer(
-            f"⚠️ Test davom etmoqda!\n\n"
-            f"👤 {active['starter_name']}"
-        )
 
     subject_name = message.text.replace(
         "📚 ",
@@ -291,87 +199,6 @@ async def choose_count(message: types.Message):
     )
 
 # =========================================================
-# GROUP SUBJECT SELECT
-# =========================================================
-@dp.callback_query(F.data.startswith("subject:"))
-async def group_subject_select(
-    callback: types.CallbackQuery
-):
-
-    chat_id = callback.message.chat.id
-
-    if chat_id in group_active_quizzes:
-
-        return await callback.answer(
-            "⚠️ Test davom etmoqda!",
-            show_alert=True
-        )
-
-    subject_name = callback.data.split(":")[1]
-
-    file_path = SUBJECTS.get(subject_name)
-
-    if not file_path:
-        return
-
-    all_tests = get_quizzes(file_path)
-
-    total_count = len(all_tests)
-
-    builder = InlineKeyboardBuilder()
-
-    for count in [25, 30, 35, 40]:
-
-        if count <= total_count:
-
-            builder.button(
-                text=f"{count} ta",
-                callback_data=f"quiz:{subject_name}:{count}"
-            )
-
-    builder.button(
-        text=f"🚀 Barchasi ({total_count})",
-        callback_data=f"quiz:{subject_name}:{total_count}"
-    )
-
-    builder.adjust(2)
-
-    await callback.message.answer(
-        f"📚 {subject_name}\n\n"
-        f"📊 Jami savollar: {total_count}\n\n"
-        f"Nechta ishlamoqchisiz?",
-        reply_markup=builder.as_markup()
-    )
-
-    await callback.answer()
-
-# =========================================================
-# GROUP QUIZ START
-# =========================================================
-@dp.callback_query(F.data.startswith("quiz:"))
-async def start_group_quiz(
-    callback: types.CallbackQuery
-):
-
-    subject = callback.data.split(":")[1]
-
-    count = int(
-        callback.data.split(":")[2]
-    )
-
-    fake_message = callback.message
-
-    fake_message.text = (
-        f"⚙️ {subject}:{count}"
-    )
-
-    fake_message.from_user = callback.from_user
-
-    await init_quiz(fake_message)
-
-    await callback.answer()
-
-# =========================================================
 # BACK
 # =========================================================
 @dp.message(F.text == "⬅️ Orqaga")
@@ -388,20 +215,9 @@ async def back_menu(message: types.Message):
 async def init_quiz(message: types.Message):
 
     user_id = message.from_user.id
-    chat_id = message.chat.id
 
     if not is_allowed(user_id):
         return
-
-    # ACTIVE GROUP QUIZ
-    if chat_id in group_active_quizzes:
-
-        active = group_active_quizzes[chat_id]
-
-        return await message.answer(
-            f"⚠️ Test davom etmoqda!\n\n"
-            f"👤 {active['starter_name']}"
-        )
 
     try:
 
@@ -463,22 +279,12 @@ async def init_quiz(message: types.Message):
             min(count, len(all_tests))
         )
 
-        session_key = get_session_key(
-            user_id,
-            chat_id
-        )
-
         # ======================================
         # SESSION
         # ======================================
-        user_sessions[session_key] = {
+        user_sessions[user_id] = {
 
             "user_id": user_id,
-
-            "chat_id": chat_id,
-
-            "starter_name":
-                message.from_user.full_name,
 
             "subject": subject,
 
@@ -488,30 +294,8 @@ async def init_quiz(message: types.Message):
 
             "correct_answers": 0,
 
-            "timer_task": None,
-
-            "participants": {}
+            "timer_task": None
         }
-
-        # ======================================
-        # GROUP ACTIVE
-        # ======================================
-        if message.chat.type in [
-            "group",
-            "supergroup"
-        ]:
-
-            group_active_quizzes[
-                chat_id
-            ] = {
-
-                "session_key": session_key,
-
-                "starter_id": user_id,
-
-                "starter_name":
-                    message.from_user.full_name
-            }
 
         # ======================================
         # STOP BUTTON
@@ -528,7 +312,9 @@ async def init_quiz(message: types.Message):
             f"🚀 TEST BOSHLANDI!\n\n"
             f"📚 Fan: {subject}\n"
             f"📊 Savollar: {len(selected_tests)}\n"
-            f"⏳ Har savol: {QUIZ_TIME} sekund",
+            f"⏳ Har savol: {QUIZ_TIME} sekund\n\n"
+            f"🔥 Omad tilaymiz!"
+            ,
             reply_markup=stop_builder.as_markup(
                 resize_keyboard=True
             )
@@ -536,7 +322,7 @@ async def init_quiz(message: types.Message):
 
         await asyncio.sleep(1)
 
-        await send_next_test(session_key)
+        await send_next_test(user_id)
 
     except Exception as e:
 
@@ -553,51 +339,19 @@ async def init_quiz(message: types.Message):
 async def stop_quiz(message: types.Message):
 
     user_id = message.from_user.id
-    chat_id = message.chat.id
 
-    found_session = None
+    session = user_sessions.get(user_id)
 
-    for key, session in user_sessions.items():
-
-        if session["chat_id"] == chat_id:
-
-            found_session = key
-
-            break
-
-    if not found_session:
+    if not session:
 
         return await message.answer(
             "❌ Aktiv test yo'q!"
         )
 
-    session = user_sessions[found_session]
-
-    allowed = False
-
-    # OWNER
-    if session["user_id"] == user_id:
-        allowed = True
-
-    # ADMIN
-    elif await is_admin(chat_id, user_id):
-        allowed = True
-
-    if not allowed:
-
-        return await message.answer(
-            "🚫 Faqat admin yoki testni boshlagan odam to'xtata oladi!"
-        )
-
-    # CANCEL TIMER
     if session["timer_task"]:
         session["timer_task"].cancel()
 
-    # DELETE
-    del user_sessions[found_session]
-
-    if chat_id in group_active_quizzes:
-        del group_active_quizzes[chat_id]
+    del user_sessions[user_id]
 
     await message.answer(
         "🛑 Test to'xtatildi!",
@@ -607,9 +361,9 @@ async def stop_quiz(message: types.Message):
 # =========================================================
 # SEND NEXT TEST
 # =========================================================
-async def send_next_test(session_key):
+async def send_next_test(user_id):
 
-    session = user_sessions.get(session_key)
+    session = user_sessions.get(user_id)
 
     if not session:
         return
@@ -618,11 +372,9 @@ async def send_next_test(session_key):
 
     tests = session["tests"]
 
-    chat_id = session["chat_id"]
-
     # FINISH
     if idx >= len(tests):
-        return await show_results(session_key)
+        return await show_results(user_id)
 
     q_data = tests[idx]
 
@@ -648,7 +400,7 @@ async def send_next_test(session_key):
     )
 
     poll_message = await bot.send_poll(
-        chat_id=chat_id,
+        chat_id=user_id,
 
         question=question[:300],
 
@@ -669,7 +421,7 @@ async def send_next_test(session_key):
 
     session["timer_task"] = asyncio.create_task(
         wait_for_timeout(
-            session_key,
+            user_id,
             idx
         )
     )
@@ -678,15 +430,13 @@ async def send_next_test(session_key):
 # TIMEOUT
 # =========================================================
 async def wait_for_timeout(
-    session_key,
+    user_id,
     index
 ):
 
     await asyncio.sleep(QUIZ_TIME + 1)
 
-    session = user_sessions.get(
-        session_key
-    )
+    session = user_sessions.get(user_id)
 
     if not session:
         return
@@ -696,13 +446,11 @@ async def wait_for_timeout(
         session["current_index"] += 1
 
         await bot.send_message(
-            session["chat_id"],
+            user_id,
             "⌛ Vaqt tugadi!"
         )
 
-        await send_next_test(
-            session_key
-        )
+        await send_next_test(user_id)
 
 # =========================================================
 # POLL ANSWER
@@ -714,73 +462,63 @@ async def handle_poll_answer(
 
     user_id = poll_answer.user.id
 
-    for session_key, session in user_sessions.items():
-
-        if poll_answer.poll_id != session.get(
-            "current_poll_id"
-        ):
-            continue
-
-        selected = poll_answer.option_ids[0]
-
-        # PARTICIPANT
-        if user_id not in session["participants"]:
-
-            session["participants"][user_id] = {
-
-                "name":
-                    poll_answer.user.full_name,
-
-                "correct": 0,
-
-                "wrong": 0
-            }
-
-        participant = session["participants"][user_id]
-
-        # CHECK
-        if selected == session["current_correct_id"]:
-
-            participant["correct"] += 1
-
-        else:
-
-            participant["wrong"] += 1
-
-        # OWNER SCORE
-        if user_id == session["user_id"]:
-
-            if selected == session["current_correct_id"]:
-
-                session["correct_answers"] += 1
-
-        # NEXT
-        if session["timer_task"]:
-            session["timer_task"].cancel()
-
-        session["current_index"] += 1
-
-        await asyncio.sleep(0.5)
-
-        await send_next_test(
-            session_key
-        )
-
-        break
-
-# =========================================================
-# RESULTS
-# =========================================================
-async def show_results(session_key):
-
-    session = user_sessions.get(
-        session_key
-    )
+    session = user_sessions.get(user_id)
 
     if not session:
         return
 
-    chat_id = session["chat_id"]
+    if poll_answer.poll_id != session.get(
+        "current_poll_id"
+    ):
+        return
+
+    selected = poll_answer.option_ids[0]
+
+    # ======================================
+    # CHECK ANSWER
+    # ======================================
+    if selected == session["current_correct_id"]:
+
+        session["correct_answers"] += 1
+
+        await bot.send_message(
+            user_id,
+
+            "🎉 TO‘G‘RI JAVOB! 🎉\n\n"
+            "✨ Ajoyib!\n"
+            "🔥 Davom eting!\n"
+            "🏆 Siz zo'rsiz!\n"
+            "🎊 🎊 🎊"
+        )
+
+    else:
+
+        await bot.send_message(
+            user_id,
+
+            "❌ Noto‘g‘ri javob!\n\n"
+            "💪 Keyingi savolda omad!"
+        )
+
+    # NEXT
+    if session["timer_task"]:
+        session["timer_task"].cancel()
+
+    session["current_index"] += 1
+
+    await asyncio.sleep(1)
+
+    await send_next_test(user_id)
+
+# =========================================================
+# RESULTS
+# =========================================================
+async def show_results(user_id):
+
+    session = user_sessions.get(user_id)
+
+    if not session:
+        return
 
     correct = session["correct_answers"]
 
@@ -790,93 +528,44 @@ async def show_results(session_key):
         correct / total
     ) * 40
 
+    if score >= 35:
+
+        rank = "👑 SUPER!"
+        celebration = "🎆 🎇 🏆 🎊"
+
+    elif score >= 25:
+
+        rank = "🔥 ZO'R!"
+        celebration = "🎉 🎉 🎉"
+
+    else:
+
+        rank = "💪 YAXSHI!"
+        celebration = "✨ ✨ ✨"
+
     result_text = (
+        f"{celebration}\n\n"
+
         f"🏁 TEST TUGADI!\n\n"
 
-        f"👤 {session['starter_name']}\n\n"
+        f"{rank}\n\n"
 
         f"✅ To'g'ri: {correct}\n"
 
         f"❌ Xato: {total-correct}\n"
 
-        f"📊 Ball: {score:.1f}/40\n"
+        f"📊 Ball: {score:.1f}/40\n\n"
+
+        f"🚀 Davom etishda davom eting!"
     )
 
-    # =====================================================
-    # GROUP STATS
-    # =====================================================
-    if session["participants"]:
+    await bot.send_message(
+        user_id,
+        result_text,
+        reply_markup=get_private_menu()
+    )
 
-        result_text += (
-            "\n📈 STATISTIKA\n"
-        )
-
-        sorted_users = sorted(
-            session["participants"].values(),
-            key=lambda x: x["correct"],
-            reverse=True
-        )
-
-        for i, user in enumerate(
-            sorted_users,
-            start=1
-        ):
-
-            total_answers = (
-                user["correct"] +
-                user["wrong"]
-            )
-
-            if total_answers in [
-                25,
-                30,
-                35,
-                40
-            ]:
-
-                ball = (
-                    user["correct"] /
-                    total_answers
-                ) * 40
-
-                result_text += (
-                    f"\n{i}. {user['name']}\n"
-                    f"✅ {user['correct']} | "
-                    f"❌ {user['wrong']} | "
-                    f"📊 {ball:.1f}/40\n"
-                )
-
-            else:
-
-                result_text += (
-                    f"\n{i}. {user['name']}\n"
-                    f"✅ {user['correct']} | "
-                    f"❌ {user['wrong']}\n"
-                )
-
-    # PRIVATE
-    if chat_id == session["user_id"]:
-
-        await bot.send_message(
-            chat_id,
-            result_text,
-            reply_markup=get_private_menu()
-        )
-
-    # GROUP
-    else:
-
-        await bot.send_message(
-            chat_id,
-            result_text
-        )
-
-    # CLEAN
-    if chat_id in group_active_quizzes:
-        del group_active_quizzes[chat_id]
-
-    if session_key in user_sessions:
-        del user_sessions[session_key]
+    del user_sessions[user_id]
 
 # =========================================================
 # MAIN
