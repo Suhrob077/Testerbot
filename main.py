@@ -52,15 +52,35 @@ def get_main_menu():
     builder.adjust(2)
     return builder.as_markup(resize_keyboard=True)
 
+# --- YANGI: Session uchun unique key yaratish ---
+def get_session_key(user_id: int, chat_id: int) -> str:
+    """
+    Shaxsiy chat va guruh uchun alohida session yaratish
+    """
+    return f"{user_id}_{chat_id}"
+
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     if not is_allowed(message.from_user.id):
-        return await message.answer(f"🚫 Kirish taqiqlangan! ID: `{message.from_user.id}`", parse_mode="Markdown")
+        return await message.answer(
+            f"🚫 Kirish taqiqlangan! ID: `{message.from_user.id}`", 
+            parse_mode="Markdown"
+        )
 
-    await message.answer(
-        "👋 **Salom, Bilimdon!**\n\nKreativ test platformasiga xush kelibsiz! 🔥\nFanni tanlang:",
-        reply_markup=get_main_menu()
-    )
+    # Guruh va shaxsiy chat uchun alohida javob
+    if message.chat.type in ["group", "supergroup"]:
+        # Guruhda
+        await message.answer(
+            "👋 **Salom!**\n\nBu guruhda testlarni boshlashingiz mumkin! 🔥\nFanni tanlang:",
+            parse_mode="Markdown"
+        )
+    else:
+        # Shaxsiy chatda
+        await message.answer(
+            "👋 **Salom, Bilimdon!**\n\nKreativ test platformasiga xush kelibsiz! 🔥\nFanni tanlang:",
+            reply_markup=get_main_menu(),
+            parse_mode="Markdown"
+        )
 
 @dp.message(F.text.startswith("📚 "))
 async def choose_count(message: types.Message):
@@ -81,22 +101,28 @@ async def choose_count(message: types.Message):
         return
 
     builder = ReplyKeyboardBuilder()
-    # Standart miqdorlar
     counts = [25, 30, 35, 40, 45, 50]
     for count in counts:
         if count <= total_count:
             builder.add(types.KeyboardButton(text=f"⚙️ {subject_name}:{count} ta savol"))
     
-    # Barcha savollarni yechish tugmasi
     builder.add(types.KeyboardButton(text=f"🚀 {subject_name} - Barchasini yechish ({total_count} ta)"))
     builder.add(types.KeyboardButton(text="⬅️ Orqaga"))
     
     builder.adjust(3, 1)
     
-    await message.answer(
-        f"🎯 **{subject_name}** fani tanlandi!\nBazadagi jami savollar: **{total_count}** ta.\n\nNechtasini yechishni xohlaysiz? 🧠",
-        reply_markup=builder.as_markup(resize_keyboard=True)
-    )
+    # Shaxsiy chatda keyboard, guruhda yo'q
+    if message.chat.type in ["group", "supergroup"]:
+        await message.answer(
+            f"🎯 **{subject_name}** fani tanlandi!\nBazadagi jami savollar: **{total_count}** ta.\n\nNechtasini yechishni xohlaysiz? 🧠",
+            parse_mode="Markdown"
+        )
+    else:
+        await message.answer(
+            f"🎯 **{subject_name}** fani tanlandi!\nBazadagi jami savollar: **{total_count}** ta.\n\nNechtasini yechishni xohlaysiz? 🧠",
+            reply_markup=builder.as_markup(resize_keyboard=True),
+            parse_mode="Markdown"
+        )
 
 @dp.message(F.text == "⬅️ Orqaga")
 async def back_to_main(message: types.Message):
@@ -105,39 +131,41 @@ async def back_to_main(message: types.Message):
 @dp.message(F.text.startswith("⚙️ ") | F.text.startswith("🚀 "))
 async def init_quiz(message: types.Message):
     user_id = message.from_user.id
+    chat_id = message.chat.id
+    
     if not is_allowed(user_id): return
 
     try:
         # Miqdorni va fanni aniqlash
         if "🚀 " in message.text:
-            # "🚀 Falsafa - Barchasini yechish (150 ta)" formatidan parse qilish
             import re
             parts = message.text.replace("🚀 ", "").split(" - ")
             subject = parts[0].strip()
             count_match = re.search(r'\((\d+)', message.text)
             count = int(count_match.group(1)) if count_match else 50
         else:
-            # "⚙️ Falsafa:25 ta savol" formatidan parse qilish
             raw_text = message.text.replace("⚙️ ", "")
             parts = raw_text.split(":")
             subject = parts[0].strip()
             count = int(parts[1].split()[0])
         
-        # Fanni tekshirish
         if subject not in SUBJECTS:
             await message.answer(f"❌ '{subject}' fani topilmadi!")
             return
         
-        # To'g'ri fanga tegishli testlarni yuklash
         all_data = get_quizzes(SUBJECTS[subject])
         
         if not all_data: 
             return await message.answer(f"❌ '{subject}' fanida testlar topilmadi.")
 
-        # Tasodifiy tanlab olish (takrorlanmaydi)
         selected_tests = random.sample(all_data, min(count, len(all_data)))
 
-        user_sessions[user_id] = {
+        # MUHIM: Session key da chat_id ham bo'lishi kerak
+        session_key = get_session_key(user_id, chat_id)
+        
+        user_sessions[session_key] = {
+            "user_id": user_id,
+            "chat_id": chat_id,  # Chat ID ni saqlash
             "subject": subject,
             "tests": selected_tests,
             "current_index": 0,
@@ -145,17 +173,24 @@ async def init_quiz(message: types.Message):
             "timer_task": None
         }
 
-        stop_builder = ReplyKeyboardBuilder()
-        stop_builder.add(types.KeyboardButton(text="🛑 Testni to'xtatish"))
-        
-        await message.answer(
-            f"⚡ **Tayyorgarlik ko'ring!**\n\nFan: *{subject}*\nSavollar: *{len(selected_tests)}* ta\n\nOmad yor bo'lsin! 🎊",
-            reply_markup=stop_builder.as_markup(resize_keyboard=True),
-            parse_mode="Markdown"
-        )
+        # Shaxsiy chatda keyboard, guruhda yo'q
+        if message.chat.type in ["group", "supergroup"]:
+            await message.answer(
+                f"⚡ **Tayyorgarlik ko'ring!**\n\nFan: *{subject}*\nSavollar: *{len(selected_tests)}* ta\n\nOmad yor bo'lsin! 🎊",
+                parse_mode="Markdown"
+            )
+        else:
+            stop_builder = ReplyKeyboardBuilder()
+            stop_builder.add(types.KeyboardButton(text="🛑 Testni to'xtatish"))
+            
+            await message.answer(
+                f"⚡ **Tayyorgarlik ko'ring!**\n\nFan: *{subject}*\nSavollar: *{len(selected_tests)}* ta\n\nOmad yor bo'lsin! 🎊",
+                reply_markup=stop_builder.as_markup(resize_keyboard=True),
+                parse_mode="Markdown"
+            )
         
         await asyncio.sleep(1.5)
-        await send_next_test(user_id, message.chat.id)
+        await send_next_test(session_key)
 
     except Exception as e:
         logging.error(f"Xatolik: {e}")
@@ -164,51 +199,49 @@ async def init_quiz(message: types.Message):
 @dp.message(F.text == "🛑 Testni to'xtatish")
 async def stop_quiz(message: types.Message):
     user_id = message.from_user.id
-    if user_id in user_sessions:
-        if user_sessions[user_id]["timer_task"]:
-            user_sessions[user_id]["timer_task"].cancel()
-        del user_sessions[user_id]
+    chat_id = message.chat.id
+    session_key = get_session_key(user_id, chat_id)
+    
+    if session_key in user_sessions:
+        if user_sessions[session_key]["timer_task"]:
+            user_sessions[session_key]["timer_task"].cancel()
+        del user_sessions[session_key]
     
     await message.answer("🏠 Bosh menyuga qaytildi.", reply_markup=get_main_menu())
 
-async def send_next_test(user_id, chat_id):
-    session = user_sessions.get(user_id)
+async def send_next_test(session_key):
+    session = user_sessions.get(session_key)
     if not session: return
 
+    chat_id = session["chat_id"]  # To'g'ri chat_id ni olish
     idx = session["current_index"]
     tests = session["tests"]
 
     if idx < len(tests):
         q_data = tests[idx]
         
-        # --- JAVOBLARNI RANDOMIZATSIYA QILISH ---
+        # Javoblarni randomizatsiya qilish
         options = list(q_data['options'])
-        correct_text = options[q_data['correct']]  # To'g'ri javob matni
-        random.shuffle(options)  # Aralashtiramiz
-        new_correct_id = options.index(correct_text)  # Yangi indeksni topamiz
+        correct_text = options[q_data['correct']]
+        random.shuffle(options)
+        new_correct_id = options.index(correct_text)
         
-        # Yangilangan ma'lumotlarni sessiyada vaqtincha saqlash (tekshirish uchun)
         session["current_correct_id"] = new_correct_id
 
-        # Savol raqami
         question_number = f"❓ Savol {idx+1}/{len(tests)}"
         question_text = q_data['question']
         
-        # Agar savol juda uzun bo'lsa (250+ belgi), uni alohida xabar sifatida yuborish
         if len(question_text) > 200:
-            # Avval savol matnini yuborish
             await bot.send_message(
                 chat_id=chat_id,
                 text=f"{question_number}\n\n{question_text}",
                 parse_mode="Markdown"
             )
-            # Poll faqat test raqami bilan
             poll_question = f"Savol {idx+1}/{len(tests)}"
         else:
-            # Qisqa savollar uchun - hammasi birgalikda
             poll_question = f"{question_number}\n\n{question_text}"
         
-        # Poll yuborish
+        # Poll yuborish - to'g'ri chat_id ga
         await bot.send_poll(
             chat_id=chat_id,
             question=poll_question,
@@ -219,36 +252,52 @@ async def send_next_test(user_id, chat_id):
             open_period=QUIZ_TIME
         )
         
-        session["timer_task"] = asyncio.create_task(wait_for_timeout(user_id, chat_id, idx))
+        session["timer_task"] = asyncio.create_task(
+            wait_for_timeout(session_key, idx)
+        )
     else:
-        await show_results(user_id, chat_id)
+        await show_results(session_key)
 
-async def wait_for_timeout(user_id, chat_id, index):
+async def wait_for_timeout(session_key, index):
     await asyncio.sleep(QUIZ_TIME + 1)
-    session = user_sessions.get(user_id)
+    session = user_sessions.get(session_key)
     if session and session["current_index"] == index:
         session["current_index"] += 1
-        await bot.send_message(chat_id, "⌛ **Vaqt tugadi!**")
-        await send_next_test(user_id, chat_id)
+        await bot.send_message(session["chat_id"], "⌛ **Vaqt tugadi!**", parse_mode="Markdown")
+        await send_next_test(session_key)
 
 @dp.poll_answer()
 async def handle_poll_answer(poll_answer: types.PollAnswer):
     user_id = poll_answer.user.id
-    session = user_sessions.get(user_id)
+    
+    # Barcha sessionlarni tekshirish (guruh va shaxsiy chatlar)
+    session_key = None
+    for key in user_sessions.keys():
+        if user_sessions[key]["user_id"] == user_id:
+            session_key = key
+            break
+    
+    if not session_key:
+        return
+    
+    session = user_sessions[session_key]
 
-    if session:
-        if session["timer_task"]:
-            session["timer_task"].cancel()
+    if session["timer_task"]:
+        session["timer_task"].cancel()
 
-        if poll_answer.option_ids[0] == session.get("current_correct_id"):
-            session["correct_answers"] += 1
+    if poll_answer.option_ids[0] == session.get("current_correct_id"):
+        session["correct_answers"] += 1
+    
+    session["current_index"] += 1
+    await asyncio.sleep(0.5)
+    await send_next_test(session_key)
+
+async def show_results(session_key):
+    session = user_sessions.get(session_key)
+    if not session:
+        return
         
-        session["current_index"] += 1
-        await asyncio.sleep(0.5)
-        await send_next_test(user_id, user_id)
-
-async def show_results(user_id, chat_id):
-    session = user_sessions.get(user_id)
+    chat_id = session["chat_id"]
     correct = session["correct_answers"]
     total = len(session["tests"])
     
@@ -272,8 +321,23 @@ async def show_results(user_id, chat_id):
         f"{res_msg}\n{gift}"
     )
 
-    await bot.send_message(chat_id, result_text, parse_mode="Markdown", reply_markup=get_main_menu())
-    if user_id in user_sessions: del user_sessions[user_id]
+    # Shaxsiy chatda keyboard, guruhda yo'q
+    if chat_id == session["user_id"]:  # Shaxsiy chat
+        await bot.send_message(
+            chat_id, 
+            result_text, 
+            parse_mode="Markdown", 
+            reply_markup=get_main_menu()
+        )
+    else:  # Guruh
+        await bot.send_message(
+            chat_id, 
+            result_text, 
+            parse_mode="Markdown"
+        )
+    
+    if session_key in user_sessions: 
+        del user_sessions[session_key]
 
 async def main():
     await dp.start_polling(bot)
