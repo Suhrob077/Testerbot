@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 # =========================================================
 # SOZLAMALAR
 # =========================================================
-TOKEN = "BOT_TOKENINGIZNI_YOZING"
+TOKEN = "8636080560:AAF_rC_dscmRU0_R9z1XVZpSEgtX-6AOnh8"
 
 QUIZ_TIME = 60
 
