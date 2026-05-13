@@ -20,7 +20,7 @@ except ImportError:
 # =========================================================
 logging.basicConfig(level=logging.INFO)
 
-TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = "8636080560:AAF_rC_dscmRU0_R9z1XVZpSEgtX-6AOnh8"
 QUIZ_TIME = 60
 
 SUBJECTS = {
