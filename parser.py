@@ -27,13 +27,13 @@ def get_quizzes(file_path):
                 
                 if opt.startswith("#"):
                     correct_index = i
-                    final_options.append(clean_opt)
-                else:
-                    final_options.append(clean_opt)
+                
+                final_options.append(clean_opt)
             
             if len(final_options) >= 2:
+                # Savol matnini 250 belgigacha qisqartirish (300 emas, chunki boshqa matnlar ham qo'shiladi)
                 quiz_data.append({
-                    "question": question_text[:300], # Savol limiti 300
+                    "question": question_text[:250],
                     "options": final_options[:10],    # Max 10 variant
                     "correct": correct_index
                 })
