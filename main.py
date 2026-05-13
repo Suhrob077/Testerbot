@@ -5,7 +5,7 @@ import logging
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
-from parser import get_quizzes  # Parseringiz get_quizzes funksiyasini qaytarishi lozim
+from parser import get_quizzes
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +33,6 @@ def load_allowed_ids():
 ALLOWED_IDS = load_allowed_ids()
 
 def is_allowed(user_id: int):
-    # Oddiy 'in' operatori ham tez ishlaydi, lekin binar qidiruvni qoldirdik
     low, high = 0, len(ALLOWED_IDS) - 1
     while low <= high:
         mid = (low + high) // 2
@@ -67,23 +66,29 @@ async def cmd_start(message: types.Message):
 async def choose_count(message: types.Message):
     if not is_allowed(message.from_user.id): return
     
-    subject_name = message.text.replace("📚 ", "")
+    subject_name = message.text.replace("📚 ", "").strip()
     file_path = SUBJECTS.get(subject_name)
     
-    if not file_path: return
+    if not file_path: 
+        await message.answer("❌ Fan topilmadi!")
+        return
 
     all_tests = get_quizzes(file_path)
     total_count = len(all_tests)
+
+    if total_count == 0:
+        await message.answer("❌ Bu fanda testlar topilmadi!")
+        return
 
     builder = ReplyKeyboardBuilder()
     # Standart miqdorlar
     counts = [25, 30, 35, 40, 45, 50]
     for count in counts:
-        if count < total_count:
+        if count <= total_count:
             builder.add(types.KeyboardButton(text=f"⚙️ {subject_name}:{count} ta savol"))
     
     # Barcha savollarni yechish tugmasi
-    builder.add(types.KeyboardButton(text=f"🚀 Barchasini yechish ({total_count} ta)"))
+    builder.add(types.KeyboardButton(text=f"🚀 {subject_name} - Barchasini yechish ({total_count} ta)"))
     builder.add(types.KeyboardButton(text="⬅️ Orqaga"))
     
     builder.adjust(3, 1)
@@ -97,28 +102,37 @@ async def choose_count(message: types.Message):
 async def back_to_main(message: types.Message):
     await cmd_start(message)
 
-@dp.message(F.text.startswith("⚙️ ") | F.text.startswith("🚀 Barchasini"))
+@dp.message(F.text.startswith("⚙️ ") | F.text.startswith("🚀 "))
 async def init_quiz(message: types.Message):
     user_id = message.from_user.id
     if not is_allowed(user_id): return
 
     try:
-        # Miqdorni aniqlash
-        if "🚀 Barchasini" in message.text:
+        # Miqdorni va fanni aniqlash
+        if "🚀 " in message.text:
+            # "🚀 Falsafa - Barchasini yechish (150 ta)" formatidan parse qilish
             import re
-            subject = list(SUBJECTS.keys())[0] # Standart yoki xabardan qidirish
-            for s in SUBJECTS.keys():
-                if s in message.text: subject = s
-            count = int(re.search(r'\((\d+)', message.text).group(1))
+            parts = message.text.replace("🚀 ", "").split(" - ")
+            subject = parts[0].strip()
+            count_match = re.search(r'\((\d+)', message.text)
+            count = int(count_match.group(1)) if count_match else 50
         else:
+            # "⚙️ Falsafa:25 ta savol" formatidan parse qilish
             raw_text = message.text.replace("⚙️ ", "")
             parts = raw_text.split(":")
-            subject = parts[0]
+            subject = parts[0].strip()
             count = int(parts[1].split()[0])
         
+        # Fanni tekshirish
+        if subject not in SUBJECTS:
+            await message.answer(f"❌ '{subject}' fani topilmadi!")
+            return
+        
+        # To'g'ri fanga tegishli testlarni yuklash
         all_data = get_quizzes(SUBJECTS[subject])
+        
         if not all_data: 
-            return await message.answer("❌ Testlar topilmadi.")
+            return await message.answer(f"❌ '{subject}' fanida testlar topilmadi.")
 
         # Tasodifiy tanlab olish (takrorlanmaydi)
         selected_tests = random.sample(all_data, min(count, len(all_data)))
@@ -144,6 +158,7 @@ async def init_quiz(message: types.Message):
         await send_next_test(user_id, message.chat.id)
 
     except Exception as e:
+        logging.error(f"Xatolik: {e}")
         await message.answer(f"⚠️ Xatolik: {e}")
 
 @dp.message(F.text == "🛑 Testni to'xtatish")
@@ -168,18 +183,35 @@ async def send_next_test(user_id, chat_id):
         
         # --- JAVOBLARNI RANDOMIZATSIYA QILISH ---
         options = list(q_data['options'])
-        correct_text = options[q_data['correct']] # To'g'ri javob matni
-        random.shuffle(options) # Aralashtiramiz
-        new_correct_id = options.index(correct_text) # Yangi indeksni topamiz
+        correct_text = options[q_data['correct']]  # To'g'ri javob matni
+        random.shuffle(options)  # Aralashtiramiz
+        new_correct_id = options.index(correct_text)  # Yangi indeksni topamiz
         
         # Yangilangan ma'lumotlarni sessiyada vaqtincha saqlash (tekshirish uchun)
         session["current_correct_id"] = new_correct_id
 
-        progress = "🟦" * (idx + 1) + "⬜" * (len(tests) - idx - 1)
+        # Savol raqami
+        question_number = f"❓ Savol {idx+1}/{len(tests)}"
+        question_text = q_data['question']
         
+        # Agar savol juda uzun bo'lsa (250+ belgi), uni alohida xabar sifatida yuborish
+        if len(question_text) > 200:
+            # Avval savol matnini yuborish
+            await bot.send_message(
+                chat_id=chat_id,
+                text=f"{question_number}\n\n{question_text}",
+                parse_mode="Markdown"
+            )
+            # Poll faqat test raqami bilan
+            poll_question = f"Savol {idx+1}/{len(tests)}"
+        else:
+            # Qisqa savollar uchun - hammasi birgalikda
+            poll_question = f"{question_number}\n\n{question_text}"
+        
+        # Poll yuborish
         await bot.send_poll(
             chat_id=chat_id,
-            question=f"❓ Savol {idx+1}/{len(tests)}\n\n{q_data['question']}\n\n{progress}",
+            question=poll_question,
             options=options,
             correct_option_id=new_correct_id,
             type='quiz',
