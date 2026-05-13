@@ -2,31 +2,41 @@ import asyncio
 import random
 import json
 import logging
-import re
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.enums import ChatMemberStatus
+from parser import get_quizzes
 
-# --- LOGGING ---
+# =========================================================
+# LOGGING
+# =========================================================
 logging.basicConfig(level=logging.INFO)
 
-# --- SOZLAMALAR ---
-TOKEN = "8636080560:AAF_rC_dscmRU0_R9z1XVZpSEgtX-6AOnh8"  # DIQQAT: Tokenni BotFather orqali yangilang!
-QUIZ_TIME = 60 
+# =========================================================
+# SOZLAMALAR
+# =========================================================
+TOKEN = "BOT_TOKENINGIZNI_YOZING"
+
+QUIZ_TIME = 60
 
 SUBJECTS = {
     "Falsafa": "Falsafa.docx",
     "MT-V-A": "Mtuzilma.docx"
 }
 
-# Sessionlar: chat_id -> session_data
-active_sessions = {}
+# =========================================================
+# SESSIONLAR
+# =========================================================
+user_sessions = {}
+group_active_quizzes = {}
 
-# --- ID TEKSHIRISH ---
+# =========================================================
+# ALLOWED USERS
+# =========================================================
 def load_allowed_ids():
     try:
-        with open("users.json", "r") as f:
+        with open("users.json", "r", encoding="utf-8") as f:
             data = json.load(f)
             return sorted(data.get("allowed_ids", []))
     except (FileNotFoundError, json.JSONDecodeError):
@@ -35,236 +45,560 @@ def load_allowed_ids():
 ALLOWED_IDS = load_allowed_ids()
 
 def is_allowed(user_id: int):
-    # Binary search
-    import bisect
-    index = bisect.bisect_left(ALLOWED_IDS, user_id)
-    return index < len(ALLOWED_IDS) and ALLOWED_IDS[index] == user_id
+    low, high = 0, len(ALLOWED_IDS) - 1
 
-# --- MOCK PARSER (Sizning parser.py dan keladi) ---
-# Agar parser bo'lmasa, xato bermasligi uchun:
-def get_quizzes(file_path):
-    # Bu yerda haqiqiy parseringiz ishlaydi
-    return [
-        {"question": f"{file_path} dagi 1-savol?", "options": ["A", "B", "C", "D"], "correct": 0},
-        {"question": f"{file_path} dagi 2-savol?", "options": ["X", "Y", "Z", "W"], "correct": 1},
-    ]
+    while low <= high:
+        mid = (low + high) // 2
 
-# --- BOT OBYEKTLARI ---
+        if ALLOWED_IDS[mid] == user_id:
+            return True
+        elif ALLOWED_IDS[mid] < user_id:
+            low = mid + 1
+        else:
+            high = mid - 1
+
+    return False
+
+# =========================================================
+# BOT
+# =========================================================
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# --- KEYBOARDS ---
+# =========================================================
+# MENU
+# =========================================================
 def get_main_menu():
     builder = ReplyKeyboardBuilder()
+
     for sub in SUBJECTS.keys():
         builder.add(types.KeyboardButton(text=f"📚 {sub}"))
+
     builder.adjust(2)
-    return builder.as_markup(resize_keyboard=True)
 
-def get_count_menu(subject_name, total_count):
-    builder = ReplyKeyboardBuilder()
-    counts = [10, 20, 30, 50]
-    for count in counts:
-        if count <= total_count:
-            builder.add(types.KeyboardButton(text=f"⚙️ {subject_name}:{count} ta"))
-    builder.add(types.KeyboardButton(text=f"🚀 {subject_name}:Barchasi"))
-    builder.add(types.KeyboardButton(text="⬅️ Orqaga"))
-    builder.adjust(2)
-    return builder.as_markup(resize_keyboard=True)
+    return builder.as_markup(
+        resize_keyboard=True
+    )
 
-# --- ADMIN TEKSHIRUVI ---
-async def is_admin_or_creator(message: types.Message):
-    if message.chat.type == "private":
-        return True
-    member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-    return member.status in ["administrator", "creator"]
+# =========================================================
+# SESSION KEY
+# =========================================================
+def get_session_key(user_id: int, chat_id: int):
+    return f"{user_id}_{chat_id}"
 
-# --- HANDLERS ---
+# =========================================================
+# ADMIN TEKSHIRISH
+# =========================================================
+async def is_admin(chat_id: int, user_id: int):
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
 
+        return member.status in [
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.CREATOR
+        ]
+
+    except Exception:
+        return False
+
+# =========================================================
+# START
+# =========================================================
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    if not is_allowed(message.from_user.id):
-        return await message.answer(f"🚫 Kirish taqiqlangan! ID: `{message.from_user.id}`", parse_mode="Markdown")
 
-    if message.chat.id in active_sessions:
-        return await message.answer("⚠️ Hozirda test davom etmoqda. Tugashini kuting!")
+    user_id = message.from_user.id
+    chat_id = message.chat.id
 
-    welcome_text = (
-        "👋 **Xush kelibsiz!**\n\n"
-        "Guruhda testni faqat ruxsati borlar boshlay oladi.\n"
-        "To'xtatish esa faqat **Adminlar** uchun.\n\n"
-        "Fanni tanlang:"
-    )
-    
+    if not is_allowed(user_id):
+        return await message.answer(
+            f"🚫 Kirish taqiqlangan!\nID: `{user_id}`",
+            parse_mode="Markdown"
+        )
+
+    # GURUHDA TEST BORMI?
+    if chat_id in group_active_quizzes:
+
+        active = group_active_quizzes[chat_id]
+
+        await message.answer(
+            f"⚠️ Guruhda allaqachon test ishlayapti!\n\n"
+            f"👤 Boshlagan odam: {active['starter_name']}"
+        )
+        return
+
     await message.answer(
-        welcome_text,
-        reply_markup=get_main_menu(),
-        parse_mode="Markdown"
+        "👋 Salom!\n\n"
+        "📚 Fanlardan birini tanlang:",
+        reply_markup=get_main_menu()
     )
 
+# =========================================================
+# FAN TANLASH
+# =========================================================
 @dp.message(F.text.startswith("📚 "))
 async def choose_count(message: types.Message):
-    if not is_allowed(message.from_user.id): return
-    if message.chat.id in active_sessions: return
+
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+
+    if not is_allowed(user_id):
+        return
+
+    # GURUHDA TEST BORMI?
+    if chat_id in group_active_quizzes:
+
+        active = group_active_quizzes[chat_id]
+
+        await message.answer(
+            f"⚠️ Hozir test davom etmoqda!\n\n"
+            f"👤 Boshlagan odam: {active['starter_name']}"
+        )
+        return
 
     subject_name = message.text.replace("📚 ", "").strip()
-    file_path = SUBJECTS.get(subject_name)
-    
-    if not file_path: return
 
-    # Parserdan ma'lumot olish
+    file_path = SUBJECTS.get(subject_name)
+
+    if not file_path:
+        return await message.answer("❌ Fan topilmadi!")
+
     all_tests = get_quizzes(file_path)
+
     total_count = len(all_tests)
 
-    await message.answer(
-        f"🎯 **{subject_name}** tanlandi.\nBazadagi jami savollar: {total_count} ta.\nNechtasini yechamiz?",
-        reply_markup=get_count_menu(subject_name, total_count)
+    if total_count == 0:
+        return await message.answer("❌ Test topilmadi!")
+
+    builder = ReplyKeyboardBuilder()
+
+    counts = [25, 30, 35, 40]
+
+    for count in counts:
+
+        if count <= total_count:
+            builder.add(
+                types.KeyboardButton(
+                    text=f"⚙️ {subject_name}:{count}"
+                )
+            )
+
+    builder.add(
+        types.KeyboardButton(
+            text=f"🚀 {subject_name} - Barchasi ({total_count})"
+        )
     )
 
+    builder.add(
+        types.KeyboardButton(
+            text="⬅️ Orqaga"
+        )
+    )
+
+    builder.adjust(2)
+
+    await message.answer(
+        f"🎯 {subject_name}\n\n"
+        f"📊 Jami savollar: {total_count}\n\n"
+        f"Nechta ishlamoqchisiz?",
+        reply_markup=builder.as_markup(resize_keyboard=True)
+    )
+
+# =========================================================
+# ORQAGA
+# =========================================================
 @dp.message(F.text == "⬅️ Orqaga")
 async def back_to_main(message: types.Message):
-    if message.chat.id in active_sessions: return
     await cmd_start(message)
 
+# =========================================================
+# TEST BOSHLASH
+# =========================================================
 @dp.message(F.text.startswith("⚙️ ") | F.text.startswith("🚀 "))
 async def init_quiz(message: types.Message):
-    chat_id = message.chat.id
+
     user_id = message.from_user.id
-    
-    if not is_allowed(user_id): return
-    if chat_id in active_sessions:
-        return await message.answer("❌ Test allaqachon boshlangan!")
+    chat_id = message.chat.id
 
-    # Fan va sonni ajratib olish
+    if not is_allowed(user_id):
+        return
+
+    # GURUHDA TEST BORMI?
+    if chat_id in group_active_quizzes:
+
+        active = group_active_quizzes[chat_id]
+
+        await message.answer(
+            f"⚠️ Test allaqachon ishlayapti!\n\n"
+            f"👤 {active['starter_name']}"
+        )
+        return
+
     try:
-        if "🚀" in message.text:
-            subject = message.text.split(":")[0].replace("🚀 ", "").strip()
-            count = 999 # Hammasi
+
+        # =====================================================
+        # SUBJECT VA COUNT
+        # =====================================================
+        if message.text.startswith("🚀 "):
+
+            import re
+
+            parts = message.text.replace("🚀 ", "").split(" - ")
+
+            subject = parts[0].strip()
+
+            count_match = re.search(r"\((\d+)\)", message.text)
+
+            count = int(count_match.group(1))
+
         else:
+
             raw = message.text.replace("⚙️ ", "")
-            subject, count_raw = raw.split(":")
-            count = int(re.search(r'\d+', count_raw).group())
 
-        all_data = get_quizzes(SUBJECTS[subject])
-        selected_tests = random.sample(all_data, min(count, len(all_data)))
+            parts = raw.split(":")
 
-        # SESSION YARATISH
-        active_sessions[chat_id] = {
-            "starter_id": user_id,
+            subject = parts[0].strip()
+
+            count = int(parts[1])
+
+        if subject not in SUBJECTS:
+            return await message.answer("❌ Fan topilmadi!")
+
+        all_tests = get_quizzes(SUBJECTS[subject])
+
+        if not all_tests:
+            return await message.answer("❌ Test topilmadi!")
+
+        selected_tests = random.sample(
+            all_tests,
+            min(count, len(all_tests))
+        )
+
+        session_key = get_session_key(user_id, chat_id)
+
+        # =====================================================
+        # SESSION
+        # =====================================================
+        user_sessions[session_key] = {
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "starter_name": message.from_user.full_name,
             "subject": subject,
             "tests": selected_tests,
             "current_index": 0,
-            "results": {}, # user_id -> correct_count
+            "correct_answers": 0,
             "timer_task": None,
-            "current_poll_id": None
+
+            # GURUH STATISTIKA
+            "participants": {}
         }
 
-        stop_btn = ReplyKeyboardBuilder()
-        stop_btn.add(types.KeyboardButton(text="🛑 Testni to'xtatish (Faqat Admin)"))
-        
-        await message.answer(
-            f"🚀 **Test boshlanmoqda!**\nFan: {subject}\nSavollar: {len(selected_tests)} ta\n\n"
-            f"Guruhdagilar, tayyor turing!",
-            reply_markup=stop_btn.as_markup(resize_keyboard=True),
-            parse_mode="Markdown"
+        # =====================================================
+        # GURUHDA AKTIV TEST
+        # =====================================================
+        if message.chat.type in ["group", "supergroup"]:
+
+            group_active_quizzes[chat_id] = {
+                "session_key": session_key,
+                "starter_id": user_id,
+                "starter_name": message.from_user.full_name
+            }
+
+        # =====================================================
+        # STOP BUTTON
+        # =====================================================
+        stop_builder = ReplyKeyboardBuilder()
+
+        stop_builder.add(
+            types.KeyboardButton(
+                text="🛑 Testni to'xtatish"
+            )
         )
-        
-        await asyncio.sleep(2)
-        await send_next_test(chat_id)
+
+        await message.answer(
+            f"🚀 TEST BOSHLANDI!\n\n"
+            f"📚 Fan: {subject}\n"
+            f"📊 Savollar: {len(selected_tests)} ta\n\n"
+            f"⏳ Har savol uchun: {QUIZ_TIME} sekund",
+            reply_markup=stop_builder.as_markup(
+                resize_keyboard=True
+            )
+        )
+
+        await asyncio.sleep(1)
+
+        await send_next_test(session_key)
 
     except Exception as e:
-        logging.error(f"Init error: {e}")
+        logging.error(e)
+        await message.answer(f"⚠️ Xatolik:\n{e}")
 
-@dp.message(F.text == "🛑 Testni to'xtatish (Faqat Admin)")
+# =========================================================
+# STOP
+# =========================================================
+@dp.message(F.text == "🛑 Testni to'xtatish")
 async def stop_quiz(message: types.Message):
+
+    user_id = message.from_user.id
     chat_id = message.chat.id
-    if chat_id not in active_sessions:
-        return await message.answer("Hozirda faol test yo'q.")
 
-    # Faqat admin yoki testni boshlagan odam to'xtata oladi
-    if await is_admin_or_creator(message) or message.from_user.id == active_sessions[chat_id]["starter_id"]:
-        session = active_sessions[chat_id]
-        if session["timer_task"]:
-            session["timer_task"].cancel()
-        
-        del active_sessions[chat_id]
-        await message.answer("🛑 Test majburiy to'xtatildi.", reply_markup=get_main_menu())
-    else:
-        await message.answer("⚠️ Faqat adminlar testni to'xtata oladi!")
+    found_session = None
 
-async def send_next_test(chat_id):
-    session = active_sessions.get(chat_id)
-    if not session: return
+    for key, session in user_sessions.items():
 
-    idx = session["current_index"]
-    tests = session["tests"]
-
-    if idx < len(tests):
-        q_data = tests[idx]
-        options = list(q_data['options'])
-        correct_text = options[q_data['correct']]
-        random.shuffle(options)
-        new_correct_id = options.index(correct_text)
-        
-        session["current_correct_id"] = new_correct_id
-
-        poll = await bot.send_poll(
-            chat_id=chat_id,
-            question=f"Savol {idx+1}/{len(tests)}:\n{q_data['question']}",
-            options=options,
-            correct_option_id=new_correct_id,
-            type='quiz',
-            is_anonymous=False, # Kim yechganini bilish uchun
-            open_period=QUIZ_TIME
-        )
-        
-        session["current_poll_id"] = poll.poll.id
-        session["timer_task"] = asyncio.create_task(wait_for_timeout(chat_id, idx))
-    else:
-        await show_results(chat_id)
-
-async def wait_for_timeout(chat_id, index):
-    await asyncio.sleep(QUIZ_TIME + 2)
-    session = active_sessions.get(chat_id)
-    if session and session["current_index"] == index:
-        session["current_index"] += 1
-        await send_next_test(chat_id)
-
-@dp.poll_answer()
-async def handle_poll_answer(poll_answer: types.PollAnswer):
-    # Har bir javobni hisoblab boramiz
-    for chat_id, session in active_sessions.items():
-        if session.get("current_poll_id") == poll_answer.poll_id:
-            user_id = poll_answer.user.id
-            if user_id not in session["results"]:
-                session["results"][user_id] = {"name": poll_answer.user.full_name, "score": 0}
-            
-            if poll_answer.option_ids[0] == session["current_correct_id"]:
-                session["results"][user_id]["score"] += 1
+        if session["chat_id"] == chat_id:
+            found_session = key
             break
 
-async def show_results(chat_id):
-    session = active_sessions.get(chat_id)
-    if not session: return
+    if not found_session:
+        return await message.answer("❌ Aktiv test yo'q!")
 
-    results = session["results"]
-    subject = session["subject"]
-    
-    text = f"🏁 **TEST TUGADI!**\nFan: {subject}\n\n**Natijalar:**\n"
-    
-    if not results:
-        text += "Hech kim qatnashmadi. 🤷‍♂️"
-    else:
-        # Ballar bo'yicha saralash
-        sorted_res = sorted(results.values(), key=lambda x: x["score"], reverse=True)
-        for i, res in enumerate(sorted_res[:10], 1): # Top 10 talik
-            text += f"{i}. {res['name']} — {res['score']} ta ✅\n"
+    session = user_sessions[found_session]
 
-    await bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=get_main_menu())
-    del active_sessions[chat_id]
+    # =====================================================
+    # FAQAT ADMIN YOKI BOSHLAGAN ODAM
+    # =====================================================
+    allowed = False
 
+    if session["user_id"] == user_id:
+        allowed = True
+
+    elif await is_admin(chat_id, user_id):
+        allowed = True
+
+    if not allowed:
+        return await message.answer(
+            "🚫 Faqat admin yoki testni boshlagan odam to'xtata oladi!"
+        )
+
+    # TIMER STOP
+    if session["timer_task"]:
+        session["timer_task"].cancel()
+
+    # DELETE
+    del user_sessions[found_session]
+
+    if chat_id in group_active_quizzes:
+        del group_active_quizzes[chat_id]
+
+    await message.answer(
+        "🛑 Test to'xtatildi!",
+        reply_markup=get_main_menu()
+    )
+
+# =========================================================
+# NEXT TEST
+# =========================================================
+async def send_next_test(session_key):
+
+    session = user_sessions.get(session_key)
+
+    if not session:
+        return
+
+    idx = session["current_index"]
+
+    tests = session["tests"]
+
+    chat_id = session["chat_id"]
+
+    if idx >= len(tests):
+        return await show_results(session_key)
+
+    q_data = tests[idx]
+
+    options = list(q_data["options"])
+
+    correct_text = options[q_data["correct"]]
+
+    random.shuffle(options)
+
+    new_correct_id = options.index(correct_text)
+
+    session["current_correct_id"] = new_correct_id
+
+    question = (
+        f"❓ Savol {idx+1}/{len(tests)}\n\n"
+        f"{q_data['question']}"
+    )
+
+    poll_msg = await bot.send_poll(
+        chat_id=chat_id,
+        question=question[:300],
+        options=options,
+        correct_option_id=new_correct_id,
+        type="quiz",
+        is_anonymous=False,
+        open_period=QUIZ_TIME
+    )
+
+    session["current_poll_id"] = poll_msg.poll.id
+
+    session["timer_task"] = asyncio.create_task(
+        wait_for_timeout(session_key, idx)
+    )
+
+# =========================================================
+# TIMEOUT
+# =========================================================
+async def wait_for_timeout(session_key, index):
+
+    await asyncio.sleep(QUIZ_TIME + 1)
+
+    session = user_sessions.get(session_key)
+
+    if not session:
+        return
+
+    if session["current_index"] == index:
+
+        session["current_index"] += 1
+
+        await bot.send_message(
+            session["chat_id"],
+            "⌛ Vaqt tugadi!"
+        )
+
+        await send_next_test(session_key)
+
+# =========================================================
+# POLL ANSWER
+# =========================================================
+@dp.poll_answer()
+async def handle_poll_answer(poll_answer: types.PollAnswer):
+
+    user_id = poll_answer.user.id
+
+    for session_key, session in user_sessions.items():
+
+        if poll_answer.poll_id != session.get("current_poll_id"):
+            continue
+
+        selected = poll_answer.option_ids[0]
+
+        # =====================================================
+        # PARTICIPANTS
+        # =====================================================
+        if user_id not in session["participants"]:
+
+            session["participants"][user_id] = {
+                "name": poll_answer.user.full_name,
+                "correct": 0,
+                "wrong": 0
+            }
+
+        participant = session["participants"][user_id]
+
+        if selected == session["current_correct_id"]:
+            participant["correct"] += 1
+        else:
+            participant["wrong"] += 1
+
+        # =====================================================
+        # TEST OWNER
+        # =====================================================
+        if user_id == session["user_id"]:
+
+            if selected == session["current_correct_id"]:
+                session["correct_answers"] += 1
+
+            if session["timer_task"]:
+                session["timer_task"].cancel()
+
+            session["current_index"] += 1
+
+            await asyncio.sleep(0.5)
+
+            await send_next_test(session_key)
+
+        break
+
+# =========================================================
+# RESULT
+# =========================================================
+async def show_results(session_key):
+
+    session = user_sessions.get(session_key)
+
+    if not session:
+        return
+
+    chat_id = session["chat_id"]
+
+    correct = session["correct_answers"]
+
+    total = len(session["tests"])
+
+    score = (correct / total) * 40
+
+    result_text = (
+        f"🏁 TEST TUGADI!\n\n"
+        f"👤 {session['starter_name']}\n\n"
+        f"✅ To'g'ri: {correct}\n"
+        f"❌ Xato: {total-correct}\n"
+        f"📊 Ball: {score:.1f}/40\n"
+    )
+
+    # =====================================================
+    # GURUH STATISTIKA
+    # =====================================================
+    if session["participants"]:
+
+        result_text += "\n📈 GURUH STATISTIKASI\n"
+
+        sorted_users = sorted(
+            session["participants"].values(),
+            key=lambda x: x["correct"],
+            reverse=True
+        )
+
+        for i, user in enumerate(sorted_users, start=1):
+
+            total_answers = user["correct"] + user["wrong"]
+
+            # FAQAT 25/30/35/40
+            if total_answers in [25, 30, 35, 40]:
+
+                ball = (user["correct"] / total_answers) * 40
+
+                result_text += (
+                    f"\n{i}. {user['name']}\n"
+                    f"✅ {user['correct']} | "
+                    f"❌ {user['wrong']} | "
+                    f"📊 {ball:.1f}/40\n"
+                )
+
+            else:
+
+                result_text += (
+                    f"\n{i}. {user['name']}\n"
+                    f"✅ {user['correct']} | "
+                    f"❌ {user['wrong']}\n"
+                )
+
+    await bot.send_message(
+        chat_id,
+        result_text
+    )
+
+    # CLEAN
+    if chat_id in group_active_quizzes:
+        del group_active_quizzes[chat_id]
+
+    if session_key in user_sessions:
+        del user_sessions[session_key]
+
+# =========================================================
+# MAIN
+# =========================================================
 async def main():
+
+    print("✅ Bot ishga tushdi!")
+
     await dp.start_polling(bot)
 
+# =========================================================
+# RUN
+# =========================================================
 if __name__ == "__main__":
     asyncio.run(main())
