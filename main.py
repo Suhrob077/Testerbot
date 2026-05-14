@@ -12,7 +12,7 @@ from aiogram.exceptions import TelegramBadRequest
 # =========================================================
 # CONFIG & SETTINGS
 # =========================================================
-TOKEN = "8636080560:AAF_rC_dscmRU0_R9z1XVZpSEgtX-6AOnh8" # O'zingizning API tokengizni qo'ying
+TOKEN = "8636080560:AAF_rC_dscmRU0_R9z1XVZpSEgtX-6AOnh8" 
 QUIZ_TIME = 50
 
 SUBJECTS = {
@@ -25,7 +25,6 @@ try:
     from parser import get_quizzes
 except ImportError:
     def get_quizzes(path):
-        # Test uchun namuna ma'lumot (agar fayl topilmasa)
         return [{"question": "Namuna savol " * 40, "options": ["A", "B", "C", "D"], "correct": 0}]
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -42,14 +41,18 @@ def load_allowed_ids():
     try:
         with open("users.json", "r", encoding="utf-8") as f:
             data = json.load(f)
-            return sorted(data.get("allowed_ids", []))
+            # IDlarni saralangan holda saqlaymiz (Binary Search uchun)
+            return sorted([int(i) for i in data.get("allowed_ids", [])])
     except (FileNotFoundError, json.JSONDecodeError):
         return []
 
 ALLOWED_IDS = load_allowed_ids()
 
 def is_allowed(user_id: int):
-    if not ALLOWED_IDS: return True  # Agar ro'yxat bo'sh bo'lsa hamma kirsin
+    # Agar ro'yxat bo'sh bo'lsa, xavfsizlik uchun hech kimni kiritmaymiz 
+    # (yoki test uchun True qaytarishingiz mumkin)
+    if not ALLOWED_IDS: return False  
+    
     low, high = 0, len(ALLOWED_IDS) - 1
     while low <= high:
         mid = (low + high) // 2
@@ -77,20 +80,31 @@ dp = Dispatcher()
 # =========================================================
 # HANDLERS
 # =========================================================
+
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    if not is_allowed(message.from_user.id):
-        return await message.answer("🚫 Kechirasiz, sizga botdan foydalanishga ruxsat berilmagan.")
+    user_id = message.from_user.id
+    
+    if not is_allowed(user_id):
+        return await message.answer(
+            f"🚫 <b>Kechirasiz, sizga ruxsat berilmagan!</b>\n\n"
+            f"Botdan foydalanish uchun administratorga murojaat qiling.\n"
+            f"Sizning ID raqamingiz: <code>{user_id}</code>",
+            parse_mode="HTML"
+        )
     
     await message.answer(
-        "🎓 <b>PROFESSIONAL TEST BOT</b>\n\nBilimingizni sinash uchun quyidagi fanlardan birini tanlang:",
+        f"🎓 <b>PROFESSIONAL TEST BOT</b>\n\nAssalomu alaykum, {message.from_user.first_name}!\n"
+        "Bilimingizni sinash uchun quyidagi fanlardan birini tanlang:",
         reply_markup=get_main_menu(),
         parse_mode="HTML"
     )
 
 @dp.message(F.text.startswith("📚 "))
 async def choose_count(message: types.Message):
-    if not is_allowed(message.from_user.id): return
+    user_id = message.from_user.id
+    if not is_allowed(user_id):
+        return await message.answer(f"🚫 Ruxsat yo'q. ID: <code>{user_id}</code>", parse_mode="HTML")
     
     subject_name = message.text.replace("📚 ", "").strip()
     file_path = SUBJECTS.get(subject_name)
@@ -202,15 +216,12 @@ async def send_next_test(user_id):
     question_text = q['question'].strip()
     
     try:
-        # AGAR SAVOL 300 BELGIDAN OSHSA
         if len(question_text) > 300:
-            # 1. Savolni matn ko'rinishida yuboramiz
             await bot.send_message(
                 user_id, 
                 f"<b>Savol {idx + 1}/{total}</b>\n\n{question_text}", 
                 parse_mode="HTML"
             )
-            # 2. Pollni faqat javob variantlari bilan yuboramiz
             poll_question = f"Savol {idx + 1}/{total} javobini belgilang:"
         else:
             poll_question = f"({idx + 1}/{total}) {question_text}"
@@ -228,7 +239,7 @@ async def send_next_test(user_id):
 
     except TelegramBadRequest as e:
         logging.error(f"Telegram API Error: {e}")
-        await bot.send_message(user_id, "⚠️ Bu savolni yuborishda texnik xatolik (masalan, variantlar juda uzun) yuz berdi. Keyingisiga o'tamiz.")
+        await bot.send_message(user_id, "⚠️ Texnik xatolik yuz berdi. Keyingisiga o'tamiz.")
         session["current_index"] += 1
         await send_next_test(user_id)
 
@@ -250,7 +261,7 @@ async def handle_poll_answer(poll_answer: types.PollAnswer):
                 random.choice(SUCCESS_MESSAGES),
                 message_effect_id=FIREWORK_EFFECT
             )
-        except: pass # Effekt xatolik bersa e'tiborsiz qoldiramiz
+        except: pass
     else:
         await bot.send_message(user_id, "❌ Noto‘g‘ri javob!")
 
