@@ -89,7 +89,7 @@ async def cmd_start(message: types.Message):
         return await message.answer(
             f"🚫 <b>Kechirasiz, sizga ruxsat berilmagan!</b>\n\n"
             f"Botdan foydalanish uchun administratorga murojaat qiling.\n"
-            f"Sizning ID raqamingiz: <code>{user_id}</code>",
+            f"Sizning ID: <code>{user_id}</code>",
             parse_mode="HTML"
         )
     
