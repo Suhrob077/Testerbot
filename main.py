@@ -17,14 +17,17 @@ QUIZ_TIME = 50
 
 SUBJECTS = {
     "Falsafa": "Falsafa.docx",
-    "MT-V-A": "Mtuzilma.docx"
+    "MT-V-A": "Mtuzilma.docx",
+    "Dasturlash": "Dasturlash.docx"  # Yangi fan
 }
 
 # Parser funksiyasini yuklash
 try:
-    from parser import get_quizzes
+    from parser import get_quizzes, get_quizzes_programming
 except ImportError:
     def get_quizzes(path):
+        return [{"question": "Namuna savol " * 40, "options": ["A", "B", "C", "D"], "correct": 0}]
+    def get_quizzes_programming(path):
         return [{"question": "Namuna savol " * 40, "options": ["A", "B", "C", "D"], "correct": 0}]
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -113,7 +116,12 @@ async def choose_count(message: types.Message):
         return await message.answer("❌ Xatolik: Fan ma'lumotnomasi topilmadi.")
 
     try:
-        all_tests = get_quizzes(file_path)
+        # Dasturlash fani uchun maxsus parser
+        if subject_name == "Dasturlash":
+            all_tests = get_quizzes_programming(file_path)
+        else:
+            all_tests = get_quizzes(file_path)
+            
         if not all_tests:
             return await message.answer("⚠️ Ushbu fan bo'yicha savollar hali yuklanmagan.")
 
@@ -155,7 +163,12 @@ async def init_quiz(message: types.Message):
             subject, c = raw.split(":")
             count = int(c)
 
-        all_tests = get_quizzes(SUBJECTS[subject])
+        # Dasturlash fani uchun maxsus parser
+        if subject == "Dasturlash":
+            all_tests = get_quizzes_programming(SUBJECTS[subject])
+        else:
+            all_tests = get_quizzes(SUBJECTS[subject])
+            
         selected = random.sample(all_tests, min(count, len(all_tests)))
 
         user_sessions[user_id] = {
