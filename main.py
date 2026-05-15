@@ -12,7 +12,7 @@ from aiogram.exceptions import TelegramBadRequest
 # =========================================================
 # CONFIG & SETTINGS
 # =========================================================
-TOKEN = "8636080560:AAF_rC_dscmRU0_R9z1XVZpSEgtX-6AOnh8" 
+TOKEN = "8810890132:AAEDf47oemfd-ascu4R8b4tOPFUBlewg9bY" 
 QUIZ_TIME = 50
 
 SUBJECTS = {
