@@ -21,7 +21,8 @@ SUBJECTS = {
     "MT-V-A": "Mtuzilma.docx",
     "Dasturlash": "Dasturlash.docx",
     "Dinshunoslik": "Dinshunoslik.docx",
-    "Ingliz tili": "Ingliz.docx"  # <--- Eski fanlarga tegmasdan qo'childi
+    "Ingliz tili-{Di}": "Ingliz2.docx",
+    "Ingliz tili-{KIN}": "Ingliz.docx"  # <--- Eski fanlarga tegmasdan qo'childi
 }
 
 ENGLISH_PDF_PATH = "Ingliz_javoblar.pdf" # <--- PDF kalit fayli
