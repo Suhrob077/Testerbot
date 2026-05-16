@@ -20,16 +20,20 @@ SUBJECTS = {
     "Falsafa": "Falsafa.docx",
     "MT-V-A": "Mtuzilma.docx",
     "Dasturlash": "Dasturlash.docx",
-    "Dinshunoslik": "Dinshunoslik.docx" # Yangi fan qo'shildi
+    "Dinshunoslik": "Dinshunoslik.docx",
+    "Ingliz tili": "Ingliz.docx"  # <--- Eski fanlarga tegmasdan qo'childi
 }
 
-# Parser funksiyalarini yuklash
+ENGLISH_PDF_PATH = "Ingliz_javoblar.pdf" # <--- PDF kalit fayli
+
+# Parser funksiyalarini bitta joyda xavfsiz yuklash
 try:
-    from parser import get_quizzes, get_quizzes_programming, get_quizzes_dinshunoslik
+    from parser import get_quizzes, get_quizzes_programming, get_quizzes_dinshunoslik, get_quizzes_english_pdf_docx
 except ImportError:
     def get_quizzes(p): return []
     def get_quizzes_programming(p): return []
     def get_quizzes_dinshunoslik(p): return []
+    def get_quizzes_english_pdf_docx(d, p): return []
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -124,9 +128,15 @@ async def choose_count(message: types.Message):
     file_path = SUBJECTS.get(subject_name)
 
     try:
-        if subject_name == "Dasturlash": all_tests = get_quizzes_programming(file_path)
-        elif subject_name == "Dinshunoslik": all_tests = get_quizzes_dinshunoslik(file_path)
-        else: all_tests = get_quizzes(file_path)
+        # Fanlarni to'g'ri parserlarga yo'naltirish (Eski fanlar mantiqi to'liq saqlandi)
+        if subject_name == "Dasturlash": 
+            all_tests = get_quizzes_programming(file_path)
+        elif subject_name == "Dinshunoslik": 
+            all_tests = get_quizzes_dinshunoslik(file_path)
+        elif subject_name == "Ingliz tili": 
+            all_tests = get_quizzes_english_pdf_docx(file_path, ENGLISH_PDF_PATH)
+        else: 
+            all_tests = get_quizzes(file_path)
             
         if not all_tests: return await message.answer("⚠️ Savollar topilmadi.")
 
@@ -161,9 +171,16 @@ async def init_quiz(message: types.Message):
             count = int(c)
 
         file_path = SUBJECTS[subject]
-        if subject == "Dasturlash": all_tests = get_quizzes_programming(file_path)
-        elif subject == "Dinshunoslik": all_tests = get_quizzes_dinshunoslik(file_path)
-        else: all_tests = get_quizzes(file_path)
+        
+        # Testlarni yuklash mantiqi (Bu yer ham to'liq tozalandi)
+        if subject == "Dasturlash": 
+            all_tests = get_quizzes_programming(file_path)
+        elif subject == "Dinshunoslik": 
+            all_tests = get_quizzes_dinshunoslik(file_path)
+        elif subject == "Ingliz tili": 
+            all_tests = get_quizzes_english_pdf_docx(file_path, ENGLISH_PDF_PATH)
+        else: 
+            all_tests = get_quizzes(file_path)
             
         selected = random.sample(all_tests, min(count, len(all_tests)))
         user_sessions[message.from_user.id] = {
@@ -175,7 +192,8 @@ async def init_quiz(message: types.Message):
                              reply_markup=ReplyKeyboardBuilder().add(types.KeyboardButton(text="🛑 Testni to'xtatish")).as_markup(resize_keyboard=True), 
                              parse_mode="HTML")
         await send_next_test(message.from_user.id)
-    except: await message.answer("❌ Xatolik.")
+    except Exception as e: 
+        await message.answer("❌ Xatolik yuz berdi.")
 
 # =========================================================
 # CORE LOGIC: SEND NEXT TEST
