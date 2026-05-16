@@ -1,3 +1,4 @@
+import pdfplumber
 from docx import Document
 import re
 
@@ -133,4 +134,106 @@ def get_quizzes(file_path):
         return quiz_data
     except Exception as e:
         print(f"Standart parser xatosi: {e}")
+# CHIZIQLAR VA ESKI FUNKSIYALARNING TAGIDAN SHUNDAYLIGICHA QO'SHIB QO'YING:
+
+def get_quizzes_english_pdf_docx(docx_path, pdf_path):
+    """
+    Ingliz tili uchun yangi qo'shimcha parser.
+    Mavjud parserlarga zarar yetkazmaydi.
+    DOCX dan savol/variantlarni oladi, PDF dan qizil matnlarni indeks bo'yicha moslaydi.
+    """
+    try:
+        # 1. PDF dan qizil rangli so'zlarni (to'g'ri javoblarni) tartib bilan yig'amiz
+        pdf_answers = []
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                chars = page.chars
+                current_word = []
+                
+                for char in chars:
+                    # Rang parametrlarini tekshirish (non_stroking yoki stroking color)
+                    color = char.get("non_stroking_color") or char.get("stroking_color")
+                    is_red = False
+                    
+                    if color:
+                        # Agar rang RGB formatida bo'lsa (0.0 - 1.0 yoki 0 - 255 oralig'ida)
+                        if len(color) == 3:
+                            r, g, b = color
+                            if (r > 0.7 and g < 0.3 and b < 0.3) or (r == 255 and g == 0 and b == 0):
+                                is_red = True
+                    
+                    if is_red:
+                        current_word.append(char["text"])
+                    else:
+                        if current_word:
+                            word_str = "".join(current_word).strip()
+                            # Tartib raqamlar (1, 2, 3...) javob bo'lib kirmasligi uchun tekshiramiz
+                            if word_str and not word_str.isdigit() and len(word_str) > 1:
+                                pdf_answers.append(word_str.lower())
+                            current_word = []
+                
+                if current_word:
+                    word_str = "".join(current_word).strip()
+                    if word_str and not word_str.isdigit() and len(word_str) > 1:
+                        pdf_answers.append(word_str.lower())
+
+        # 2. DOCX faylidan test strukturasini (4 qatorlik blok va chiziqlarni) o'qiymiz
+        from docx import Document
+        doc = Document(docx_path)
+        quiz_data = []
+        
+        raw_lines = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+        clean_lines = []
+        for line in raw_lines:
+            # Ajratuvchi pastki chiziqlar yoki keraksiz separatorlarni o'tkazib yuboramiz
+            if set(line).issubset({'_', '=', '+', '-', '*', ' '}) and len(line) > 1:
+                continue
+            clean_lines.append(line)
+
+        i = 0
+        docx_quizzes = []
+        
+        while i < len(clean_lines):
+            line = clean_lines[i]
+            # Har bir test bloki 'choose' so'zi bilan boshlanadi
+            if "choose the correct" in line.lower() or "choose the word" in line.lower():
+                question_text = line
+                options = []
+                i += 1
+                
+                # Keyingi savol boshlanguncha variantlarni yig'ish (odatda 3 yoki 4 ta qator)
+                while i < len(clean_lines) and not ("choose the correct" in clean_lines[i].lower() or "choose the word" in clean_lines[i].lower()):
+                    options.append(clean_lines[i])
+                    i += 1
+                
+                if len(options) >= 2:
+                    docx_quizzes.append({
+                        "question": question_text,
+                        "options": options
+                    })
+            else:
+                i += 1
+
+        # 3. Indeks bo'yicha bog'lash (Index Mapping)
+        for idx, docx_quiz in enumerate(docx_quizzes):
+            correct_idx = 0  # Default qiymat
+            
+            if idx < len(pdf_answers):
+                correct_answer_text = pdf_answers[idx]
+                
+                # PDF dan kelgan so'zni DOCX variantlari ichidan harflar bo'yicha qidiramiz
+                for opt_idx, option in enumerate(docx_quiz["options"]):
+                    if correct_answer_text in option.lower():
+                        correct_idx = opt_idx
+                        break
+            
+            quiz_data.append({
+                "question": docx_quiz["question"][:250],
+                "options": [opt[:100] for opt in docx_quiz["options"]][:10],
+                "correct": correct_idx
+            })
+
+        return quiz_data
+    except Exception as e:
+        print(f"Ingliz tili PDF+DOCX kombinatsiyalangan parser xatosi: {e}")
         return []
