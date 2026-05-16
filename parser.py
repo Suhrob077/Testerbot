@@ -25,7 +25,7 @@ def get_quizzes_programming(file_path):
                 options = []
                 while i < len(paragraphs) and paragraphs[i].startswith("—"):
                     option_text = paragraphs[i].replace("—", "").strip()
-                    options.append(option_text[:100]) # Telegram limiti
+                    options.append(option_text[:100])
                     i += 1
                 
                 if len(options) >= 2 and question_text:
@@ -49,7 +49,6 @@ def get_quizzes_dinshunoslik(file_path):
     try:
         doc = Document(file_path)
         quiz_data = []
-        # Separator va bo'sh qatorlarni tashlab faqat matnlarni olamiz
         raw_lines = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
         clean_lines = []
         for line in raw_lines:
@@ -60,7 +59,6 @@ def get_quizzes_dinshunoslik(file_path):
         i = 0
         while i < len(clean_lines):
             line = clean_lines[i]
-            # Savolni oxiridagi '?' yoki keyingi qator variant ekanligidan aniqlaymiz
             if line.endswith('?') or (i + 1 < len(clean_lines) and clean_lines[i+1].startswith('#')):
                 question_text = line
                 options = []
@@ -68,9 +66,7 @@ def get_quizzes_dinshunoslik(file_path):
                 i += 1
                 
                 temp_idx = 0
-                # Keyingi savolga kelguncha variantlarni yig'amiz
                 while i < len(clean_lines) and not clean_lines[i].endswith('?'):
-                    # Agar yangi savol boshlanib qolsa (so'roqsiz bo'lsa ham)
                     if i + 1 < len(clean_lines) and not clean_lines[i].startswith('#') and \
                        not clean_lines[i+1].startswith('#') and len(options) >= 2:
                         break
@@ -99,7 +95,7 @@ def get_quizzes_dinshunoslik(file_path):
 
 def get_quizzes(file_path):
     """
-    Falsafa va MT-V-A fanlari uchun parser.
+    Falsafa, MT-V-A va Ingliz tili-{Di} fanlari uchun parser.
     Format: ++++ va ==== bilan ajratilgan
     """
     try:
@@ -134,12 +130,11 @@ def get_quizzes(file_path):
         return quiz_data
     except Exception as e:
         print(f"Standart parser xatosi: {e}")
-# CHIZIQLAR VA ESKI FUNKSIYALARNING TAGIDAN SHUNDAYLIGICHA QO'SHIB QO'YING:
+        return []
 
 def get_quizzes_english_pdf_docx(docx_path, pdf_path):
     """
-    Ingliz tili uchun yangi qo'shimcha parser.
-    Mavjud parserlarga zarar yetkazmaydi.
+    Ingliz tili-{KIN} uchun yangi qo'shimcha parser.
     DOCX dan savol/variantlarni oladi, PDF dan qizil matnlarni indeks bo'yicha moslaydi.
     """
     try:
@@ -151,12 +146,10 @@ def get_quizzes_english_pdf_docx(docx_path, pdf_path):
                 current_word = []
                 
                 for char in chars:
-                    # Rang parametrlarini tekshirish (non_stroking yoki stroking color)
                     color = char.get("non_stroking_color") or char.get("stroking_color")
                     is_red = False
                     
                     if color:
-                        # Agar rang RGB formatida bo'lsa (0.0 - 1.0 yoki 0 - 255 oralig'ida)
                         if len(color) == 3:
                             r, g, b = color
                             if (r > 0.7 and g < 0.3 and b < 0.3) or (r == 255 and g == 0 and b == 0):
@@ -167,7 +160,6 @@ def get_quizzes_english_pdf_docx(docx_path, pdf_path):
                     else:
                         if current_word:
                             word_str = "".join(current_word).strip()
-                            # Tartib raqamlar (1, 2, 3...) javob bo'lib kirmasligi uchun tekshiramiz
                             if word_str and not word_str.isdigit() and len(word_str) > 1:
                                 pdf_answers.append(word_str.lower())
                             current_word = []
@@ -177,15 +169,13 @@ def get_quizzes_english_pdf_docx(docx_path, pdf_path):
                     if word_str and not word_str.isdigit() and len(word_str) > 1:
                         pdf_answers.append(word_str.lower())
 
-        # 2. DOCX faylidan test strukturasini (4 qatorlik blok va chiziqlarni) o'qiymiz
-        from docx import Document
+        # 2. DOCX faylidan test strukturasini o'qiymiz
         doc = Document(docx_path)
         quiz_data = []
         
         raw_lines = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
         clean_lines = []
         for line in raw_lines:
-            # Ajratuvchi pastki chiziqlar yoki keraksiz separatorlarni o'tkazib yuboramiz
             if set(line).issubset({'_', '=', '+', '-', '*', ' '}) and len(line) > 1:
                 continue
             clean_lines.append(line)
@@ -195,13 +185,11 @@ def get_quizzes_english_pdf_docx(docx_path, pdf_path):
         
         while i < len(clean_lines):
             line = clean_lines[i]
-            # Har bir test bloki 'choose' so'zi bilan boshlanadi
             if "choose the correct" in line.lower() or "choose the word" in line.lower():
                 question_text = line
                 options = []
                 i += 1
                 
-                # Keyingi savol boshlanguncha variantlarni yig'ish (odatda 3 yoki 4 ta qator)
                 while i < len(clean_lines) and not ("choose the correct" in clean_lines[i].lower() or "choose the word" in clean_lines[i].lower()):
                     options.append(clean_lines[i])
                     i += 1
@@ -214,14 +202,13 @@ def get_quizzes_english_pdf_docx(docx_path, pdf_path):
             else:
                 i += 1
 
-        # 3. Indeks bo'yicha bog'lash (Index Mapping)
+        # 3. Indeks bo'yicha bog'lash
         for idx, docx_quiz in enumerate(docx_quizzes):
-            correct_idx = 0  # Default qiymat
+            correct_idx = 0
             
             if idx < len(pdf_answers):
                 correct_answer_text = pdf_answers[idx]
                 
-                # PDF dan kelgan so'zni DOCX variantlari ichidan harflar bo'yicha qidiramiz
                 for opt_idx, option in enumerate(docx_quiz["options"]):
                     if correct_answer_text in option.lower():
                         correct_idx = opt_idx
@@ -235,5 +222,5 @@ def get_quizzes_english_pdf_docx(docx_path, pdf_path):
 
         return quiz_data
     except Exception as e:
-        print(f"Ingliz tili PDF+DOCX kombinatsiyalangan parser xatosi: {e}")
+        print(f"Ingliz tili PDF+DOCX parser xatosi: {e}")
         return []
