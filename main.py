@@ -132,7 +132,7 @@ async def choose_count(message: types.Message):
 
         total_count = len(all_tests)
         builder = ReplyKeyboardBuilder()
-        for count in [25, 50, 100]:
+        for count in [20, 25, 30, 50, 100]:
             if count <= total_count: builder.add(types.KeyboardButton(text=f"⚙️ {subject_name}:{count}"))
 
         builder.add(types.KeyboardButton(text=f"🚀 {subject_name} - Barchasi ({total_count})"))
