@@ -22,10 +22,10 @@ SUBJECTS = {
     "Dasturlash": "Dasturlash.docx",
     "Dinshunoslik": "Dinshunoslik.docx",
     "Ingliz tili-{Di}": "Ingliz2.docx",
-    "Ingliz tili-{KIN}": "Ingliz.docx"  # <--- Eski fanlarga tegmasdan qo'childi
+    "Ingliz tili-{KIN}": "Ingliz.docx"
 }
 
-ENGLISH_PDF_PATH = "Ingliz_javoblar.pdf" # <--- PDF kalit fayli
+ENGLISH_PDF_PATH = "Ingliz_javoblar.pdf"
 
 # Parser funksiyalarini bitta joyda xavfsiz yuklash
 try:
@@ -39,7 +39,7 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 FIREWORK_EFFECT = "5046509860389126442"
-SUCCESS_MESSAGES = ["🎉 TO‘G‘RI JAVOB!", "✨ SUPER!", "🏆 AJOYIB!", "🔥 ZO‘R ISH!"]
+SUCCESS_MESSAGES = ["🎉 TO'G'RI JAVOB!", "✨ SUPER!", "🏆 AJOYIB!", "🔥 ZO'R ISH!"]
 
 # =========================================================
 # UTILS & SESSION MANAGEMENT
@@ -129,34 +129,43 @@ async def choose_count(message: types.Message):
     file_path = SUBJECTS.get(subject_name)
 
     try:
-        # Fanlarni to'g'ri parserlarga yo'naltirish (Eski fanlar mantiqi to'liq saqlandi)
+        # ✅ To'g'ri fan nomlarini tekshirish
         if subject_name == "Dasturlash": 
             all_tests = get_quizzes_programming(file_path)
         elif subject_name == "Dinshunoslik": 
             all_tests = get_quizzes_dinshunoslik(file_path)
-        elif subject_name == "Ingliz tili": 
+        elif subject_name == "Ingliz tili-{KIN}":
             all_tests = get_quizzes_english_pdf_docx(file_path, ENGLISH_PDF_PATH)
+        elif subject_name == "Ingliz tili-{Di}":
+            all_tests = get_quizzes(file_path)
         else: 
             all_tests = get_quizzes(file_path)
             
-        if not all_tests: return await message.answer("⚠️ Savollar topilmadi.")
+        if not all_tests: 
+            return await message.answer("⚠️ Savollar topilmadi.")
 
         total_count = len(all_tests)
         builder = ReplyKeyboardBuilder()
         for count in [20, 25, 30, 50, 100]:
-            if count <= total_count: builder.add(types.KeyboardButton(text=f"⚙️ {subject_name}:{count}"))
+            if count <= total_count: 
+                builder.add(types.KeyboardButton(text=f"⚙️ {subject_name}:{count}"))
 
         builder.add(types.KeyboardButton(text=f"🚀 {subject_name} - Barchasi ({total_count})"))
         builder.add(types.KeyboardButton(text="⬅️ Orqaga"))
         builder.adjust(2)
 
-        await message.answer(f"🎯 <b>Fan:</b> {subject_name}\n📊 <b>Jami:</b> {total_count} ta", 
-                             reply_markup=builder.as_markup(resize_keyboard=True), parse_mode="HTML")
+        await message.answer(
+            f"🎯 <b>Fan:</b> {subject_name}\n📊 <b>Jami:</b> {total_count} ta", 
+            reply_markup=builder.as_markup(resize_keyboard=True), 
+            parse_mode="HTML"
+        )
     except Exception as e:
+        logging.error(f"choose_count xatosi: {e}")
         await message.answer("❌ Ma'lumotlarni o'qishda xatolik.")
 
 @dp.message(F.text == "⬅️ Orqaga")
-async def back_to_home(message: types.Message): await cmd_start(message)
+async def back_to_home(message: types.Message): 
+    await cmd_start(message)
 
 @dp.message(F.text.startswith("⚙️ ") | F.text.startswith("🚀 "))
 async def init_quiz(message: types.Message):
@@ -173,27 +182,40 @@ async def init_quiz(message: types.Message):
 
         file_path = SUBJECTS[subject]
         
-        # Testlarni yuklash mantiqi (Bu yer ham to'liq tozalandi)
+        # ✅ To'g'ri fan nomlarini tekshirish
         if subject == "Dasturlash": 
             all_tests = get_quizzes_programming(file_path)
         elif subject == "Dinshunoslik": 
             all_tests = get_quizzes_dinshunoslik(file_path)
-        elif subject == "Ingliz tili": 
+        elif subject == "Ingliz tili-{KIN}":
             all_tests = get_quizzes_english_pdf_docx(file_path, ENGLISH_PDF_PATH)
+        elif subject == "Ingliz tili-{Di}":
+            all_tests = get_quizzes(file_path)
         else: 
             all_tests = get_quizzes(file_path)
             
+        if not all_tests:
+            return await message.answer("⚠️ Testlar yuklanmadi!")
+            
         selected = random.sample(all_tests, min(count, len(all_tests)))
         user_sessions[message.from_user.id] = {
-            "subject": subject, "tests": selected, "current_index": 0,
-            "correct_answers": 0, "current_poll_id": None
+            "subject": subject, 
+            "tests": selected, 
+            "current_index": 0,
+            "correct_answers": 0, 
+            "current_poll_id": None
         }
 
-        await message.answer(f"🚀 <b>{subject}</b> boshlandi!", 
-                             reply_markup=ReplyKeyboardBuilder().add(types.KeyboardButton(text="🛑 Testni to'xtatish")).as_markup(resize_keyboard=True), 
-                             parse_mode="HTML")
+        await message.answer(
+            f"🚀 <b>{subject}</b> boshlandi!", 
+            reply_markup=ReplyKeyboardBuilder().add(
+                types.KeyboardButton(text="🛑 Testni to'xtatish")
+            ).as_markup(resize_keyboard=True), 
+            parse_mode="HTML"
+        )
         await send_next_test(message.from_user.id)
     except Exception as e: 
+        logging.error(f"init_quiz xatosi: {e}")
         await message.answer("❌ Xatolik yuz berdi.")
 
 # =========================================================
@@ -224,8 +246,13 @@ async def send_next_test(user_id):
             poll_q = f"({idx + 1}/{len(tests)}) {q['question']}"
 
         poll = await bot.send_poll(
-            chat_id=user_id, question=poll_q[:300], options=options,
-            correct_option_id=correct_id, type="quiz", is_anonymous=False, open_period=QUIZ_TIME
+            chat_id=user_id, 
+            question=poll_q[:300], 
+            options=options,
+            correct_option_id=correct_id, 
+            type="quiz", 
+            is_anonymous=False, 
+            open_period=QUIZ_TIME
         )
         session["current_poll_id"] = poll.poll.id
     except:
@@ -240,10 +267,12 @@ async def handle_poll_answer(poll_answer: types.PollAnswer):
 
     if poll_answer.option_ids[0] == session["current_correct_id"]:
         session["correct_answers"] += 1
-        try: await bot.send_message(user_id, random.choice(SUCCESS_MESSAGES), message_effect_id=FIREWORK_EFFECT)
-        except: pass
+        try: 
+            await bot.send_message(user_id, random.choice(SUCCESS_MESSAGES), message_effect_id=FIREWORK_EFFECT)
+        except: 
+            pass
     else:
-        await bot.send_message(user_id, "❌ Noto‘g‘ri javob!")
+        await bot.send_message(user_id, "❌ Noto'g'ri javob!")
 
     session["current_index"] += 1
     await asyncio.sleep(1.2)
@@ -256,15 +285,17 @@ async def show_results(user_id):
     score = (correct / total) * 40
 
     await bot.send_message(
-        user_id, f"🏁 <b>YAKUNLANDI</b>\n✅ To'g'ri: {correct}\n🏆 Ball: {score:.1f}/40",
-        parse_mode="HTML", reply_markup=get_main_menu()
+        user_id, 
+        f"🏁 <b>YAKUNLANDI</b>\n✅ To'g'ri: {correct}\n🏆 Ball: {score:.1f}/40",
+        parse_mode="HTML", 
+        reply_markup=get_main_menu()
     )
     user_sessions.pop(user_id, None)
 
 @dp.message(F.text == "🛑 Testni to'xtatish")
 async def stop_quiz(message: types.Message):
     user_sessions.pop(message.from_user.id, None)
-    await message.answer("🛑 Test to‘xtatildi.", reply_markup=get_main_menu())
+    await message.answer("🛑 Test to'xtatildi.", reply_markup=get_main_menu())
 
 async def main():
     print("--- Bot ishga tushdi ---")
