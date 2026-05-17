@@ -141,27 +141,63 @@ def normalize_text(text):
     """
     if not text:
         return ""
-    # Faqat harflar va raqamlarni qoldirish
     text = re.sub(r'[^a-zA-Z0-9\s]', '', text)
-    # Bir nechta bo'sh joyni bitta qilish
     text = re.sub(r'\s+', ' ', text)
     return text.strip().lower()
+
+# Inglizcha savol prefixlarini uzbekchaga tarjima qilish
+ENGLISH_QUESTION_TRANSLATIONS = {
+    "choose the correct answer": "To'g'ri javobni tanlang",
+    "choose the correct word": "To'g'ri so'zni tanlang",
+    "choose the word closest in meaning to": "Ma'nosi eng yaqin so'zni tanlang",
+    "choose the word closest in meaning": "Ma'nosi eng yaqin so'zni tanlang",
+    "complete the sentence": "Gapni to'ldiring",
+    "choose the correct alternative to": "To'g'ri muqobilni tanlang",
+    "choose the correct translation of the word": "So'zning to'g'ri tarjimasini tanlang",
+    "choose the correct preposition": "To'g'ri predlogni tanlang",
+    "it is a group of people working together for illegal purposes": "Bu noqonuniy maqsadlarda birga ishlaydigan odamlar guruhi"
+}
+
+def translate_english_question(question_text):
+    """
+    Inglizcha savol matnini tarjima bilan qaytaradi.
+    Format: {Tarjima = Inglizcha}
+    """
+    question_lower = question_text.lower().strip()
+    
+    for eng_phrase, uz_translation in ENGLISH_QUESTION_TRANSLATIONS.items():
+        if eng_phrase in question_lower:
+            # Inglizcha qismni topish
+            start_idx = question_lower.find(eng_phrase)
+            end_idx = start_idx + len(eng_phrase)
+            
+            # Original registrda inglizcha qismni olish
+            original_eng = question_text[start_idx:end_idx]
+            
+            # Qolgan qismni ham qo'shish (agar bor bo'lsa)
+            remaining = question_text[end_idx:].strip()
+            
+            if remaining:
+                return f"{uz_translation} = {original_eng} {remaining}"
+            else:
+                return f"{uz_translation} = {original_eng}"
+    
+    # Agar mos kelish topilmasa, asl matnni qaytarish
+    return question_text
 
 def get_quizzes_english_pdf_docx(docx_path, pdf_path):
     """
     Ingliz tili-{KIN} uchun PDF+DOCX parser.
-    Harf-harf va uzunlik bo'yicha aniq taqqoslash.
+    Savollarga uzbekcha tarjima qo'shiladi.
     """
     try:
         print("\n" + "="*60)
         print("🔍 INGLIZ TILI PARSER BOSHLANDI")
         print("="*60)
         
-        # =========================================================
-        # 1-BOSQICH: PDF dan qizil rangli matnlarni olish
-        # =========================================================
+        # PDF dan javoblarni olish
         pdf_answers = []
-        pdf_answers_original = []  # Original holda saqlash (debug uchun)
+        pdf_answers_original = []
         
         with pdfplumber.open(pdf_path) as pdf:
             for page_num, page in enumerate(pdf.pages):
@@ -174,7 +210,6 @@ def get_quizzes_english_pdf_docx(docx_path, pdf_path):
                     
                     if color and len(color) == 3:
                         r, g, b = color
-                        # Qizil rangni aniqlash (kengaytirilgan chegaralar)
                         if (r > 0.6 and g < 0.4 and b < 0.4) or \
                            (isinstance(r, int) and r > 150 and g < 100 and b < 100):
                             is_red = True
@@ -184,7 +219,6 @@ def get_quizzes_english_pdf_docx(docx_path, pdf_path):
                     else:
                         if current_word:
                             word_str = "".join(current_word).strip()
-                            # Raqamlar va juda qisqa matnlarni o'tkazib yuborish
                             if word_str and not word_str.isdigit() and len(word_str) > 1:
                                 pdf_answers_original.append(word_str)
                                 normalized = normalize_text(word_str)
@@ -192,7 +226,6 @@ def get_quizzes_english_pdf_docx(docx_path, pdf_path):
                                     pdf_answers.append(normalized)
                             current_word = []
                 
-                # Sahifa oxirida qolgan so'zni tekshirish
                 if current_word:
                     word_str = "".join(current_word).strip()
                     if word_str and not word_str.isdigit() and len(word_str) > 1:
@@ -202,20 +235,13 @@ def get_quizzes_english_pdf_docx(docx_path, pdf_path):
                             pdf_answers.append(normalized)
         
         print(f"\n✅ PDF dan topilgan javoblar: {len(pdf_answers)} ta")
-        print("📋 Birinchi 10 ta javob:")
-        for i in range(min(10, len(pdf_answers))):
-            print(f"   [{i+1}] Original: '{pdf_answers_original[i]}' → Normalized: '{pdf_answers[i]}'")
 
-        # =========================================================
-        # 2-BOSQICH: DOCX dan savollar va variantlarni olish
-        # =========================================================
+        # DOCX dan savollarni olish
         doc = Document(docx_path)
         raw_lines = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
         
-        # Separator chiziqlarni olib tashlash
         clean_lines = []
         for line in raw_lines:
-            # Faqat chiziqlar va maxsus belgilardan iborat qatorlarni o'tkazib yuborish
             if set(line).issubset({'_', '=', '+', '-', '*', ' ', '—'}) and len(line) > 1:
                 continue
             clean_lines.append(line)
@@ -225,51 +251,46 @@ def get_quizzes_english_pdf_docx(docx_path, pdf_path):
         
         while i < len(clean_lines):
             line = clean_lines[i]
-            # Savolni aniqlash
             if "choose the correct" in line.lower() or "choose the word" in line.lower() or \
-               "choose the best" in line.lower() or "select the correct" in line.lower():
+               "choose the best" in line.lower() or "select the correct" in line.lower() or \
+               "complete the sentence" in line.lower() or "it is a group" in line.lower():
                 question_text = line
                 options = []
                 i += 1
                 
-                # Variantlarni yig'ish (keyingi savolga yetguncha)
                 while i < len(clean_lines):
                     current_line = clean_lines[i]
-                    # Yangi savol boshlanganini tekshirish
                     if "choose the correct" in current_line.lower() or \
                        "choose the word" in current_line.lower() or \
                        "choose the best" in current_line.lower() or \
-                       "select the correct" in current_line.lower():
+                       "select the correct" in current_line.lower() or \
+                       "complete the sentence" in current_line.lower() or \
+                       "it is a group" in current_line.lower():
                         break
                     
-                    # Agar qator variant bo'lsa (bo'sh emas va juda uzun emas)
                     if current_line and len(current_line) < 200:
                         options.append(current_line)
                     i += 1
                 
                 if len(options) >= 2:
+                    # ✅ Savolni tarjima bilan saqlash
+                    translated_question = translate_english_question(question_text)
+                    
                     docx_quizzes.append({
-                        "question": question_text,
-                        "options": options
+                        "question": translated_question,
+                        "options": options,
+                        "original_question": question_text  # Asl inglizcha savolni ham saqlash
                     })
             else:
                 i += 1
         
         print(f"\n✅ DOCX dan topilgan savollar: {len(docx_quizzes)} ta")
-        print("📋 Birinchi 3 ta savol:")
-        for i in range(min(3, len(docx_quizzes))):
-            print(f"   [{i+1}] {docx_quizzes[i]['question'][:60]}...")
-            print(f"       Variantlar ({len(docx_quizzes[i]['options'])} ta): {docx_quizzes[i]['options']}")
 
-        # =========================================================
-        # 3-BOSQICH: HARF-HARF VA UZUNLIK BO'YICHA MAPPING
-        # =========================================================
+        # Javoblarni moslashtirish
         quiz_data = []
-        match_stats = {"perfect": 0, "partial": 0, "none": 0}
         
         for idx, docx_quiz in enumerate(docx_quizzes):
-            correct_idx = 0  # Default birinchi variant
-            match_type = "none"
+            correct_idx = 0
             
             if idx < len(pdf_answers):
                 pdf_answer = pdf_answers[idx]
@@ -278,68 +299,38 @@ def get_quizzes_english_pdf_docx(docx_path, pdf_path):
                 best_match_score = 0
                 best_match_idx = 0
                 
-                # Har bir variantni tekshirish
                 for opt_idx, option in enumerate(docx_quiz["options"]):
                     option_normalized = normalize_text(option)
                     option_len = len(option_normalized)
                     
-                    # 1. TO'LIQ ANIQLIQ (100% mos kelish)
                     if pdf_answer == option_normalized:
                         correct_idx = opt_idx
-                        match_type = "perfect"
                         best_match_score = 100
                         break
                     
-                    # 2. PDF javobi variant ichida (substring)
                     if pdf_answer in option_normalized:
                         score = (pdf_answer_len / option_len) * 100
                         if score > best_match_score:
                             best_match_score = score
                             best_match_idx = opt_idx
-                            match_type = "partial"
                     
-                    # 3. Variant PDF javobi ichida (teskari substring)
                     if option_normalized in pdf_answer:
                         score = (option_len / pdf_answer_len) * 100
                         if score > best_match_score:
                             best_match_score = score
                             best_match_idx = opt_idx
-                            match_type = "partial"
                 
-                # Agar to'liq mos kelish topilmasa, eng yaxshi qisman moslikni olish
-                if match_type == "partial" and best_match_score >= 60:
+                if best_match_score >= 60 and best_match_score < 100:
                     correct_idx = best_match_idx
-                
-                match_stats[match_type] += 1
-                
-                # Debug ma'lumoti
-                if idx < 5:  # Birinchi 5 ta uchun batafsil
-                    print(f"\n🔗 Savol #{idx+1} Mapping:")
-                    print(f"   PDF javob: '{pdf_answer}' (uzunlik: {pdf_answer_len})")
-                    print(f"   DOCX variantlar:")
-                    for opt_idx, opt in enumerate(docx_quiz["options"]):
-                        opt_norm = normalize_text(opt)
-                        marker = "✅" if opt_idx == correct_idx else "  "
-                        print(f"   {marker} [{opt_idx}] '{opt}' → '{opt_norm}'")
-                    print(f"   Match type: {match_type}, Score: {best_match_score:.1f}%")
             
             quiz_data.append({
-                "question": docx_quiz["question"][:250],
+                "question": docx_quiz["question"][:300],  # Tarjima bilan birga
                 "options": [opt[:100] for opt in docx_quiz["options"]][:10],
-                "correct": correct_idx
+                "correct": correct_idx,
+                "pdf_answer": pdf_answers_original[idx] if idx < len(pdf_answers_original) else ""  # PDF javobini saqlash
             })
         
-        # =========================================================
-        # YAKUNIY STATISTIKA
-        # =========================================================
-        print("\n" + "="*60)
-        print("📊 YAKUNIY STATISTIKA:")
-        print("="*60)
-        print(f"✅ Jami testlar: {len(quiz_data)} ta")
-        print(f"🎯 To'liq mos kelish (Perfect): {match_stats['perfect']} ta")
-        print(f"⚠️ Qisman mos kelish (Partial): {match_stats['partial']} ta")
-        print(f"❌ Mos kelish topilmadi: {match_stats['none']} ta")
-        print(f"📈 Muvaffaqiyat darajasi: {((match_stats['perfect'] + match_stats['partial']) / len(quiz_data) * 100):.1f}%")
+        print(f"\n✅ Jami testlar: {len(quiz_data)} ta")
         print("="*60 + "\n")
         
         return quiz_data
