@@ -134,10 +134,7 @@ def get_quizzes(file_path):
 
 def normalize_text(text):
     """
-    Matnni taqqoslash uchun normalizatsiya qiladi:
-    - Kichik harfga o'tkazadi
-    - Maxsus belgilarni olib tashlaydi
-    - Ortiqcha bo'sh joylarni tozalaydi
+    Matnni taqqoslash uchun normalizatsiya qiladi
     """
     if not text:
         return ""
@@ -155,7 +152,9 @@ ENGLISH_QUESTION_TRANSLATIONS = {
     "choose the correct alternative to": "To'g'ri muqobilni tanlang",
     "choose the correct translation of the word": "So'zning to'g'ri tarjimasini tanlang",
     "choose the correct preposition": "To'g'ri predlogni tanlang",
-    "it is a group of people working together for illegal purposes": "Bu noqonuniy maqsadlarda birga ishlaydigan odamlar guruhi"
+    "it is a group of people working together for illegal purposes": "Bu noqonuniy maqsadlarda birga ishlaydigan odamlar guruhi",
+    "choose the best": "Eng yaxshisini tanlang",
+    "select the correct": "To'g'risini tanlang"
 }
 
 def translate_english_question(question_text):
@@ -167,14 +166,9 @@ def translate_english_question(question_text):
     
     for eng_phrase, uz_translation in ENGLISH_QUESTION_TRANSLATIONS.items():
         if eng_phrase in question_lower:
-            # Inglizcha qismni topish
             start_idx = question_lower.find(eng_phrase)
             end_idx = start_idx + len(eng_phrase)
-            
-            # Original registrda inglizcha qismni olish
             original_eng = question_text[start_idx:end_idx]
-            
-            # Qolgan qismni ham qo'shish (agar bor bo'lsa)
             remaining = question_text[end_idx:].strip()
             
             if remaining:
@@ -182,22 +176,59 @@ def translate_english_question(question_text):
             else:
                 return f"{uz_translation} = {original_eng}"
     
-    # Agar mos kelish topilmasa, asl matnni qaytarish
     return question_text
+
+def calculate_similarity(text1, text2):
+    """
+    Ikki matn o'rtasidagi o'xshashlikni hisoblash (0-100)
+    """
+    norm1 = normalize_text(text1)
+    norm2 = normalize_text(text2)
+    
+    if not norm1 or not norm2:
+        return 0
+    
+    # To'liq mos kelish
+    if norm1 == norm2:
+        return 100
+    
+    # Birining ikkinchisi ichida bo'lishi
+    if norm1 in norm2:
+        return (len(norm1) / len(norm2)) * 100
+    
+    if norm2 in norm1:
+        return (len(norm2) / len(norm1)) * 100
+    
+    # Umumiy so'zlar soni (Jaccard similarity)
+    words1 = set(norm1.split())
+    words2 = set(norm2.split())
+    
+    if not words1 or not words2:
+        return 0
+    
+    intersection = len(words1.intersection(words2))
+    union = len(words1.union(words2))
+    
+    if union == 0:
+        return 0
+    
+    return (intersection / union) * 100
 
 def get_quizzes_english_pdf_docx(docx_path, pdf_path):
     """
     Ingliz tili-{KIN} uchun PDF+DOCX parser.
-    Savollarga uzbekcha tarjima qo'shiladi.
+    PDF va DOCX tartibsiz bo'lsa ham ishlaydi.
+    Har bir DOCX savoli uchun BARCHA PDF qizil matnlar ichidan eng yaqinini topadi.
     """
     try:
         print("\n" + "="*60)
         print("🔍 INGLIZ TILI PARSER BOSHLANDI")
         print("="*60)
         
-        # PDF dan javoblarni olish
-        pdf_answers = []
-        pdf_answers_original = []
+        # =========================================================
+        # 1-BOSQICH: PDF dan BARCHA qizil matnlarni olish
+        # =========================================================
+        pdf_red_texts = []
         
         with pdfplumber.open(pdf_path) as pdf:
             for page_num, page in enumerate(pdf.pages):
@@ -220,23 +251,22 @@ def get_quizzes_english_pdf_docx(docx_path, pdf_path):
                         if current_word:
                             word_str = "".join(current_word).strip()
                             if word_str and not word_str.isdigit() and len(word_str) > 1:
-                                pdf_answers_original.append(word_str)
-                                normalized = normalize_text(word_str)
-                                if normalized:
-                                    pdf_answers.append(normalized)
+                                pdf_red_texts.append(word_str)
                             current_word = []
                 
                 if current_word:
                     word_str = "".join(current_word).strip()
                     if word_str and not word_str.isdigit() and len(word_str) > 1:
-                        pdf_answers_original.append(word_str)
-                        normalized = normalize_text(word_str)
-                        if normalized:
-                            pdf_answers.append(normalized)
+                        pdf_red_texts.append(word_str)
         
-        print(f"\n✅ PDF dan topilgan javoblar: {len(pdf_answers)} ta")
+        print(f"\n✅ PDF dan topilgan qizil matnlar: {len(pdf_red_texts)} ta")
+        print("📋 Birinchi 10 ta:")
+        for i in range(min(10, len(pdf_red_texts))):
+            print(f"   [{i+1}] '{pdf_red_texts[i]}'")
 
-        # DOCX dan savollarni olish
+        # =========================================================
+        # 2-BOSQICH: DOCX dan savollar va variantlarni olish
+        # =========================================================
         doc = Document(docx_path)
         raw_lines = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
         
@@ -273,64 +303,89 @@ def get_quizzes_english_pdf_docx(docx_path, pdf_path):
                     i += 1
                 
                 if len(options) >= 2:
-                    # ✅ Savolni tarjima bilan saqlash
                     translated_question = translate_english_question(question_text)
                     
                     docx_quizzes.append({
                         "question": translated_question,
                         "options": options,
-                        "original_question": question_text  # Asl inglizcha savolni ham saqlash
+                        "original_question": question_text
                     })
             else:
                 i += 1
         
         print(f"\n✅ DOCX dan topilgan savollar: {len(docx_quizzes)} ta")
 
-        # Javoblarni moslashtirish
+        # =========================================================
+        # 3-BOSQICH: HAR BIR SAVOL UCHUN ENG YAXSHI JAVOBNI TOPISH
+        # =========================================================
         quiz_data = []
+        match_stats = {"perfect": 0, "high": 0, "medium": 0, "low": 0, "none": 0}
         
-        for idx, docx_quiz in enumerate(docx_quizzes):
-            correct_idx = 0
+        for quiz_idx, docx_quiz in enumerate(docx_quizzes):
+            best_correct_idx = 0
+            best_pdf_answer = ""
+            best_overall_score = 0
+            match_level = "none"
             
-            if idx < len(pdf_answers):
-                pdf_answer = pdf_answers[idx]
-                pdf_answer_len = len(pdf_answer)
-                
-                best_match_score = 0
-                best_match_idx = 0
-                
+            # Har bir PDF qizil matni uchun
+            for pdf_text in pdf_red_texts:
+                # Har bir DOCX variant bilan taqqoslash
                 for opt_idx, option in enumerate(docx_quiz["options"]):
-                    option_normalized = normalize_text(option)
-                    option_len = len(option_normalized)
+                    similarity = calculate_similarity(pdf_text, option)
                     
-                    if pdf_answer == option_normalized:
-                        correct_idx = opt_idx
-                        best_match_score = 100
-                        break
-                    
-                    if pdf_answer in option_normalized:
-                        score = (pdf_answer_len / option_len) * 100
-                        if score > best_match_score:
-                            best_match_score = score
-                            best_match_idx = opt_idx
-                    
-                    if option_normalized in pdf_answer:
-                        score = (option_len / pdf_answer_len) * 100
-                        if score > best_match_score:
-                            best_match_score = score
-                            best_match_idx = opt_idx
-                
-                if best_match_score >= 60 and best_match_score < 100:
-                    correct_idx = best_match_idx
+                    if similarity > best_overall_score:
+                        best_overall_score = similarity
+                        best_correct_idx = opt_idx
+                        best_pdf_answer = pdf_text
+                        
+                        # Match darajasini aniqlash
+                        if similarity == 100:
+                            match_level = "perfect"
+                        elif similarity >= 80:
+                            match_level = "high"
+                        elif similarity >= 60:
+                            match_level = "medium"
+                        elif similarity >= 40:
+                            match_level = "low"
+            
+            # Statistika
+            match_stats[match_level] += 1
+            
+            # Debug (har 20-chi savol va birinchi 5 ta)
+            if quiz_idx < 5 or quiz_idx % 20 == 0:
+                print(f"\n🔗 Savol #{quiz_idx+1}:")
+                print(f"   Savol: {docx_quiz['question'][:60]}...")
+                print(f"   Variantlar:")
+                for opt_i, opt in enumerate(docx_quiz["options"]):
+                    marker = "✅" if opt_i == best_correct_idx else "  "
+                    print(f"   {marker} [{opt_i}] {opt[:50]}")
+                print(f"   PDF javob: '{best_pdf_answer}'")
+                print(f"   O'xshashlik: {best_overall_score:.1f}% ({match_level})")
             
             quiz_data.append({
-                "question": docx_quiz["question"][:300],  # Tarjima bilan birga
+                "question": docx_quiz["question"][:300],
                 "options": [opt[:100] for opt in docx_quiz["options"]][:10],
-                "correct": correct_idx,
-                "pdf_answer": pdf_answers_original[idx] if idx < len(pdf_answers_original) else ""  # PDF javobini saqlash
+                "correct": best_correct_idx,
+                "pdf_answer": best_pdf_answer if best_pdf_answer else "Topilmadi",
+                "confidence": best_overall_score  # Ishonch darajasi
             })
         
-        print(f"\n✅ Jami testlar: {len(quiz_data)} ta")
+        # =========================================================
+        # YAKUNIY STATISTIKA
+        # =========================================================
+        print("\n" + "="*60)
+        print("📊 YAKUNIY STATISTIKA:")
+        print("="*60)
+        print(f"✅ Jami testlar: {len(quiz_data)} ta")
+        print(f"🎯 Perfect match (100%): {match_stats['perfect']} ta")
+        print(f"✨ High match (80-99%): {match_stats['high']} ta")
+        print(f"⚠️ Medium match (60-79%): {match_stats['medium']} ta")
+        print(f"⚡ Low match (40-59%): {match_stats['low']} ta")
+        print(f"❌ No match (<40%): {match_stats['none']} ta")
+        
+        total_matched = match_stats['perfect'] + match_stats['high'] + match_stats['medium']
+        if len(quiz_data) > 0:
+            print(f"📈 Ishonchli moslik (60%+): {(total_matched / len(quiz_data) * 100):.1f}%")
         print("="*60 + "\n")
         
         return quiz_data
