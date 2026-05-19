@@ -28,11 +28,10 @@ SUBJECTS = {
 ENGLISH_PDF_PATH = "Ingliz_javoblar.pdf"
 
 try:
-    from parser import get_quizzes, get_quizzes_programming, get_quizzes_dinshunoslik, get_quizzes_english_pdf_docx
+    from parser import get_quizzes, get_quizzes_programming, get_quizzes_english_pdf_docx
 except ImportError:
     def get_quizzes(p): return []
     def get_quizzes_programming(p): return []
-    def get_quizzes_dinshunoslik(p): return []
     def get_quizzes_english_pdf_docx(d, p): return []
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -129,12 +128,8 @@ async def choose_count(message: types.Message):
     try:
         if subject_name == "Dasturlash": 
             all_tests = get_quizzes_programming(file_path)
-        elif subject_name == "Dinshunoslik": 
-            all_tests = get_quizzes_dinshunoslik(file_path)
         elif subject_name == "Ingliz tili-{KIN}":
             all_tests = get_quizzes_english_pdf_docx(file_path, ENGLISH_PDF_PATH)
-        elif subject_name == "Ingliz tili-{Di}":
-            all_tests = get_quizzes(file_path)
         else: 
             all_tests = get_quizzes(file_path)
             
@@ -149,7 +144,6 @@ async def choose_count(message: types.Message):
 
         builder.add(types.KeyboardButton(text=f"🚀 {subject_name} - Barchasi ({total_count})"))
         
-        # ✅ Ingliz tili-{KIN} uchun javoblarni ko'rish tugmasi
         if subject_name == "Ingliz tili-{KIN}":
             builder.add(types.KeyboardButton(text=f"📋 {subject_name} - Javoblar"))
         
@@ -165,7 +159,6 @@ async def choose_count(message: types.Message):
         logging.error(f"choose_count xatosi: {e}")
         await message.answer("❌ Ma'lumotlarni o'qishda xatolik.")
 
-# ✅ Javoblarni ko'rish handler
 @dp.message(F.text.startswith("📋 "))
 async def show_all_answers(message: types.Message):
     if not is_allowed(message.from_user.id): return
@@ -180,7 +173,6 @@ async def show_all_answers(message: types.Message):
             if not all_tests:
                 return await message.answer("⚠️ Javoblar topilmadi.")
             
-            # Javoblarni formatlash
             answer_text = f"📋 <b>{subject_name} - Barcha javoblar</b>\n\n"
             
             for idx, test in enumerate(all_tests, 1):
@@ -192,7 +184,6 @@ async def show_all_answers(message: types.Message):
                     answer_text += f" ({pdf_answer})"
                 answer_text += "\n"
                 
-                # Har 50 ta javobdan keyin yangi xabar yuborish (Telegram limitidan)
                 if idx % 50 == 0 and idx < len(all_tests):
                     await message.answer(answer_text, parse_mode="HTML")
                     answer_text = ""
@@ -226,12 +217,8 @@ async def init_quiz(message: types.Message):
         
         if subject == "Dasturlash": 
             all_tests = get_quizzes_programming(file_path)
-        elif subject == "Dinshunoslik": 
-            all_tests = get_quizzes_dinshunoslik(file_path)
         elif subject == "Ingliz tili-{KIN}":
             all_tests = get_quizzes_english_pdf_docx(file_path, ENGLISH_PDF_PATH)
-        elif subject == "Ingliz tili-{Di}":
-            all_tests = get_quizzes(file_path)
         else: 
             all_tests = get_quizzes(file_path)
             
@@ -247,7 +234,6 @@ async def init_quiz(message: types.Message):
             "current_poll_id": None
         }
 
-        # ✅ Ingliz tili-{KIN} uchun maxsus klaviatura
         builder = ReplyKeyboardBuilder()
         builder.add(types.KeyboardButton(text="🛑 Testni to'xtatish"))
         if subject == "Ingliz tili-{KIN}":
@@ -264,7 +250,6 @@ async def init_quiz(message: types.Message):
         logging.error(f"init_quiz xatosi: {e}")
         await message.answer("❌ Xatolik yuz berdi.")
 
-# ✅ Test vaqtida javobni ko'rish handler
 @dp.message(F.text == "👁️ Javobni ko'rish")
 async def show_current_answer(message: types.Message):
     user_id = message.from_user.id
@@ -302,15 +287,20 @@ async def send_next_test(user_id):
     if idx >= len(tests): return await show_results(user_id)
 
     q = tests[idx]
-    options = [str(opt)[:100] for opt in q["options"]]
-    correct_text = options[q["correct"]]
-    random.shuffle(options)
-    correct_id = options.index(correct_text)
-    session["current_correct_id"] = correct_id
-
-    q_text = format_quiz_text(q['question'].strip())
     
     try:
+        # Agar variantlar 2 tadan kam bo'lsa yoki umuman yo'q bo'lsa xato beradi
+        if not q.get("options") or len(q["options"]) < 2:
+            raise ValueError("Variantlar yetarli emas yoki xato formatlangan.")
+
+        options = [str(opt)[:100] for opt in q["options"]]
+        correct_text = options[q["correct"]]
+        random.shuffle(options)
+        correct_id = options.index(correct_text)
+        session["current_correct_id"] = correct_id
+
+        q_text = format_quiz_text(q['question'].strip())
+        
         if len(q_text) > 250:
             await bot.send_message(user_id, f"<b>Savol {idx + 1}/{len(tests)}:</b>\n\n{q_text}", parse_mode="HTML")
             poll_q = "To'g'ri javobni tanlang:"
@@ -327,8 +317,24 @@ async def send_next_test(user_id):
             open_period=QUIZ_TIME
         )
         session["current_poll_id"] = poll.poll.id
-    except:
+
+    except Exception as e:
+        # XATO TEST HAQIDA FOYDALANUVCHIGA XABAR BERISH VA AUTO NEXT
+        logging.error(f"Test yuborishda xatolik (Savol #{idx+1}): {e}")
+        
+        err_msg = (
+            f"⚠️ <b>Xato test aniqlandi va o'tkazib yuborildi!</b>\n"
+            f"📝 <b>Savol {idx + 1}:</b> <i>{q.get('question', 'Matn yoqi')}</i>\n"
+            f"❌ <b>Xatolik sababi:</b> <code>{str(e)}</code>"
+        )
+        try:
+            await bot.send_message(user_id, err_msg, parse_mode="HTML")
+        except:
+            pass
+            
+        # Avtomatik keyingi test indeksiga o'tish (Auto Next)
         session["current_index"] += 1
+        await asyncio.sleep(1.0)
         await send_next_test(user_id)
 
 @dp.poll_answer()
